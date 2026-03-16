@@ -805,7 +805,7 @@ const App: React.FC = () => {
           </button>
         </header>
 
-        {activeTab === 'Dashboard' && <Dashboard drivers={filteredDrivers} assignedBoard={authUser?.assignedBoard} firebaseUid={user?.uid || authUser?.uid} />}
+        {activeTab === 'Dashboard' && <Dashboard drivers={filteredDrivers} assignedBoard={authUser?.assignedBoard} firebaseUid={user?.email || authUser?.uid || authUser?.email} />}
 
         {activeTab === 'Connection' && (
           <div className="space-y-8">
@@ -832,7 +832,7 @@ const App: React.FC = () => {
 
         {activeTab === 'Profile Form' && <ProfileForm drivers={drivers} emailLogs={emailLogs} onSendReminder={handleProfileFormReminder} onUpdatePFDate={handleUpdatePFDate} />}
         {activeTab === 'AI Assistant' && <AIAssistant />}
-        {activeTab === 'Broadcast' && <EmailBroadcast drivers={filteredDrivers} assignedBoard={authUser?.assignedBoard} firebaseUid={user?.uid || authUser?.uid} />}
+        {activeTab === 'Broadcast' && <EmailBroadcast drivers={filteredDrivers} assignedBoard={authUser?.assignedBoard} firebaseUid={user?.email || authUser?.uid || authUser?.email} userAccessToken={user?.accessToken} />}
         {activeTab === 'History' && (
           <div className="space-y-4">
             {emailLogs.map(log => (

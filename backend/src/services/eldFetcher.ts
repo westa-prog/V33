@@ -42,10 +42,13 @@ const authenticate = async (): Promise<string> => {
 
     console.log('[ELD AUTH] Logging in to Leader ELD (drivehos.app)...');
 
-    // Best approach: If user provided a permanent API Key, use it.
+    // If user provided a session token from the UI, use it directly.
     if (process.env.ELD_API_KEY) {
-        console.log('[ELD AUTH] Using provided ELD_API_KEY (bypassing login).');
-        return process.env.ELD_API_KEY;
+        console.log('[ELD AUTH] Using provided ELD_API_KEY as session token.');
+        // Cache it so we don't re-check on every call
+        authToken = process.env.ELD_API_KEY;
+        tokenExpiry = now + 50 * 60 * 1000;
+        return authToken;
     }
 
     const email = process.env.ELD_API_USERNAME;
@@ -106,13 +109,34 @@ export const resetAuth = () => {
 };
 
 /**
- * Test authentication with the current credentials. Returns { tenantId } on success.
+ * Test authentication with the current credentials.
+ * Makes a REAL call to /drivers?limit=1 to confirm the token actually works.
  * Throws on failure. Used by the configure endpoint to validate credentials from the UI.
  */
 export const testELDAuth = async (): Promise<{ tenantId: string | null }> => {
     // Force a fresh authentication (ignore cache)
     resetAuth();
-    await authenticate();
+    const token = await authenticate();
+    const headers = buildHeaders(token);
+
+    // Make a real test call to verify the token is accepted for data requests
+    try {
+        const testRes = await eldApi.get('/drivers', {
+            headers,
+            params: { page: 1, limit: 1, status: 'all' }
+        });
+        console.log('[ELD AUTH] Token verification passed. Response keys:', Object.keys(testRes.data || {}));
+    } catch (verifyError: any) {
+        const apiData = verifyError.response?.data;
+        const errMsg = apiData?.message || apiData?.description || JSON.stringify(apiData) || verifyError.message;
+        // Reset so we don't cache a bad token
+        resetAuth();
+        delete process.env.ELD_API_KEY;
+        delete process.env.ELD_API_USERNAME;
+        delete process.env.ELD_API_PASSWORD;
+        throw new Error(`Token rejected by ELD /drivers: ${errMsg}`);
+    }
+
     return { tenantId };
 };
 
@@ -155,7 +179,7 @@ export const fetchELDData = async (): Promise<ELDDriverPayload[]> => {
         try {
             driversRes = await eldApi.get('/drivers', {
                 headers,
-                params: { page, limit: PAGE_SIZE, tab: 'active', status: 'active', group: 'all', sortBy: 'driver', orderBy: 'asc' }
+                params: { page, limit: PAGE_SIZE, status: 'all', sortBy: 'driver', orderBy: 'asc' }
             });
         } catch (apiError: any) {
             const apiData = apiError.response?.data;
@@ -164,8 +188,41 @@ export const fetchELDData = async (): Promise<ELDDriverPayload[]> => {
             throw new Error(`ELD /drivers rejected: ${errMsg}`);
         }
 
-        const pageData: any[] = driversRes.data?.data || driversRes.data?.drivers || driversRes.data || [];
-        if (!Array.isArray(pageData) || pageData.length === 0) break;
+        // Always log raw keys on first page so we can see what the ELD returns
+        if (page === 1) {
+            console.log('[ELD DEBUG] /drivers raw top-level keys:', Object.keys(driversRes.data || {}));
+            console.log('[ELD DEBUG] /drivers raw data (truncated):', JSON.stringify(driversRes.data).slice(0, 500));
+        }
+
+        // Try every common response shape
+        let pageData: any[] =
+            driversRes.data?.data ||
+            driversRes.data?.drivers ||
+            driversRes.data?.list ||
+            driversRes.data?.results ||
+            driversRes.data?.items ||
+            driversRes.data?.records ||
+            (Array.isArray(driversRes.data) ? driversRes.data : null) ||
+            [];
+
+        // If pageData is still not an array, try to extract the first array-valued key
+        if (!Array.isArray(pageData)) {
+            const firstArrayKey = Object.keys(driversRes.data || {}).find(k => Array.isArray((driversRes.data as any)[k]));
+            if (firstArrayKey) {
+                console.log(`[ELD DEBUG] Using array key: "${firstArrayKey}"`);
+                pageData = (driversRes.data as any)[firstArrayKey];
+            } else {
+                console.warn('[ELD DEBUG] No array found in /drivers response — stopping pagination.');
+                break;
+            }
+        }
+
+        if (page === 1) {
+            console.log(`[ELD DEBUG] pageData type: ${typeof pageData}, length: ${Array.isArray(pageData) ? pageData.length : 'N/A'}`);
+            console.log('[ELD DEBUG] First driver sample:', JSON.stringify(pageData[0]).slice(0, 400));
+        }
+
+        if (pageData.length === 0) break;
 
         rawDrivers.push(...pageData);
         console.log(`[ELD] /drivers page ${page}: fetched ${pageData.length} (total so far: ${rawDrivers.length})`);

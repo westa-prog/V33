@@ -88,6 +88,95 @@ export const sendGmailMessage = async (
 };
 
 /**
+ * Service to handle broadcasting emails via the Gmail API using BCC
+ */
+export const sendGmailBroadcast = async (
+  accessToken: string,
+  bccRecipients: string[],
+  subject: string,
+  body: string,
+  attachments?: { name: string; type: string; base64: string }[]
+): Promise<{ ok: boolean; error?: string }> => {
+  const utf8Subject = `=?utf-8?B?${btoa(unescape(encodeURIComponent(subject)))}?=`;
+  const boundary = `====_Boundary_${Date.now()}_====`;
+
+  let messageParts: string[] = [];
+  const bccHeader = `Bcc: ${bccRecipients.join(', ')}`;
+
+  if (attachments && attachments.length > 0) {
+    messageParts = [
+      bccHeader,
+      `Subject: ${utf8Subject}`,
+      'MIME-Version: 1.0',
+      `Content-Type: multipart/mixed; boundary="${boundary}"`,
+      '',
+      `--${boundary}`,
+      'Content-Type: text/plain; charset=utf-8',
+      '',
+      body,
+      ''
+    ];
+
+    attachments.forEach(file => {
+      messageParts.push(
+        `--${boundary}`,
+        `Content-Type: ${file.type}; name="${file.name}"`,
+        `Content-Disposition: attachment; filename="${file.name}"`,
+        'Content-Transfer-Encoding: base64',
+        '',
+        file.base64,
+        ''
+      );
+    });
+
+    messageParts.push(`--${boundary}--`);
+  } else {
+    messageParts = [
+      bccHeader,
+      'Content-Type: text/plain; charset=utf-8',
+      'MIME-Version: 1.0',
+      `Subject: ${utf8Subject}`,
+      '',
+      body,
+    ];
+  }
+
+  const message = messageParts.join('\n');
+
+  // The message needs to be base64url encoded
+  const encodedEmail = btoa(unescape(encodeURIComponent(message)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+
+  try {
+    const response = await fetch(
+      'https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          raw: encodedEmail,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      return { ok: false, error: text || `HTTP ${response.status}` };
+    }
+
+    return { ok: true };
+  } catch (error: any) {
+    console.error('Gmail API Broadcast Error:', error);
+    return { ok: false, error: error?.message || 'Network error' };
+  }
+};
+
+/**
  * Fetches recent messages from the user's Gmail inbox and maps them to DriverReply objects.
  */
 export const fetchGmailReplies = async (

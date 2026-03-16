@@ -122,10 +122,7 @@ app.post('/api/eld/configure', async (req, res) => {
         delete process.env.ELD_API_KEY;
         console.log(`[ELD CONFIG] Username/Password configured from UI for: ${username}`);
     }
-
-    if (baseUrl) {
-        process.env.ELD_API_BASE_URL = baseUrl;
-    }
+    if (baseUrl) process.env.ELD_API_BASE_URL = baseUrl;
 
     // Test the credentials by attempting a real auth
     try {
@@ -133,14 +130,33 @@ app.post('/api/eld/configure', async (req, res) => {
         const result = await testELDAuth();
         eldAuthVerified = true;
         console.log(`[ELD CONFIG] ✅ Authentication verified! Tenant: ${result.tenantId || 'N/A'}`);
-        res.json({
-            success: true,
-            message: 'ELD credentials verified successfully.',
-            tenantId: result.tenantId
-        });
+
+        // Persist working token to .env so it survives backend restarts
+        try {
+            const envPath = path.join(__dirname, '..', '..', '.env');
+            let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf-8') : '';
+            const setVar = (c: string, k: string, v: string) => {
+                const re = new RegExp(`^${k}=.*$`, 'm');
+                return re.test(c) ? c.replace(re, `${k}=${v}`) : c + `\n${k}=${v}`;
+            };
+            if (apiKey) {
+                envContent = setVar(envContent, 'ELD_API_KEY', apiKey);
+                envContent = envContent.replace(/^ELD_API_USERNAME=.*\n?/m, '').replace(/^ELD_API_PASSWORD=.*\n?/m, '');
+            } else {
+                envContent = setVar(envContent, 'ELD_API_USERNAME', username);
+                envContent = setVar(envContent, 'ELD_API_PASSWORD', password);
+                envContent = envContent.replace(/^ELD_API_KEY=.*\n?/m, '');
+            }
+            if (baseUrl) envContent = setVar(envContent, 'ELD_API_BASE_URL', baseUrl);
+            fs.writeFileSync(envPath, envContent.trim() + '\n', 'utf-8');
+            console.log('[ELD CONFIG] ✅ Token persisted to .env file.');
+        } catch (envErr: any) {
+            console.warn('[ELD CONFIG] Could not persist to .env:', envErr.message);
+        }
+
+        res.json({ success: true, message: 'ELD credentials verified successfully.', tenantId: result.tenantId });
     } catch (e: any) {
         eldAuthVerified = false;
-        // Clear bad credentials
         delete process.env.ELD_API_KEY;
         delete process.env.ELD_API_USERNAME;
         delete process.env.ELD_API_PASSWORD;

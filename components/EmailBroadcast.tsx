@@ -1,14 +1,16 @@
 import React, { useState, useRef } from 'react';
 import { Mail, Send, Paperclip, X, File as FileIcon, Image as ImageIcon, Video as VideoIcon, Loader2, CheckCircle2 } from 'lucide-react';
 import { Driver } from '../types';
+import { sendGmailBroadcast } from '../services/gmailService';
 
 interface EmailBroadcastProps {
     drivers: Driver[];
     assignedBoard?: string;
     firebaseUid?: string;
+    userAccessToken?: string;
 }
 
-export const EmailBroadcast: React.FC<EmailBroadcastProps> = ({ drivers, assignedBoard, firebaseUid }) => {
+export const EmailBroadcast: React.FC<EmailBroadcastProps> = ({ drivers, assignedBoard, firebaseUid, userAccessToken }) => {
     const [subject, setSubject] = useState('');
     const [message, setMessage] = useState('');
     const [files, setFiles] = useState<File[]>([]);
@@ -53,6 +55,18 @@ export const EmailBroadcast: React.FC<EmailBroadcastProps> = ({ drivers, assigne
         setSelectedDrivers([]);
     };
 
+    const fileToBase64 = (file: File): Promise<string> => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = () => {
+                const result = reader.result as string;
+                resolve(result.split(',')[1]); // remove data:image/jpeg;base64,
+            };
+            reader.onerror = error => reject(error);
+        });
+    };
+
     const handleBroadcast = async () => {
         if (selectedDrivers.length === 0) return alert('Please select at least one recipient.');
         if (!subject.trim() || !message.trim()) return alert('Subject and Message are required.');
@@ -62,26 +76,43 @@ export const EmailBroadcast: React.FC<EmailBroadcastProps> = ({ drivers, assigne
         setSendSuccess(false);
 
         try {
-            const formData = new FormData();
-            formData.append('recipients', JSON.stringify(selectedDrivers));
-            formData.append('subject', subject);
-            formData.append('message', message);
-            files.forEach(file => {
-                formData.append('attachments', file);
-            });
+            // Send via Google Gmail API if logged in with OAuth
+            if (userAccessToken && userAccessToken !== 'demo_token') {
+                const base64Files = await Promise.all(files.map(async file => ({
+                    name: file.name,
+                    type: file.type || 'application/octet-stream',
+                    base64: await fileToBase64(file)
+                })));
 
-            const baseUrl = (import.meta as any).env.VITE_API_URL || 'http://localhost:5000';
-            const res = await fetch(`${baseUrl}/api/eld/broadcast`, {
-                method: 'POST',
-                body: formData
-            });
+                const bccRecipients = selectedDrivers; // Since it's an array of emails
+                const res = await sendGmailBroadcast(userAccessToken, bccRecipients, subject, message, base64Files);
 
-            const text = await res.text();
-            
-            if (!res.ok) {
-                let errorObj;
-                try { errorObj = JSON.parse(text); } catch(e) {}
-                throw new Error(errorObj?.error || `Upload failed: Request failed with status code ${res.status}`);
+                if (!res.ok) {
+                    throw new Error(res.error || 'Gmail API failed to send broadcast.');
+                }
+            } else {
+                // Fallback: Send to Node backend for SMTP logic / Mock simulation
+                const formData = new FormData();
+                formData.append('recipients', JSON.stringify(selectedDrivers));
+                formData.append('subject', subject);
+                formData.append('message', message);
+                files.forEach(file => {
+                    formData.append('attachments', file);
+                });
+
+                const baseUrl = (import.meta as any).env.VITE_API_URL || 'http://localhost:5000';
+                const res = await fetch(`${baseUrl}/api/eld/broadcast`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const text = await res.text();
+                
+                if (!res.ok) {
+                    let errorObj;
+                    try { errorObj = JSON.parse(text); } catch(e) {}
+                    throw new Error(errorObj?.error || `Upload failed: Request failed with status code ${res.status}`);
+                }
             }
 
             setSendSuccess(true);
