@@ -26,7 +26,7 @@ export interface EmailLogEntry {
   statusAtTime: DutyStatus;
   content: string;
   type?: '3_day_reminder' | '5_day_reminder' | 'custom' | string;
-  sentVia?: 'Simulation' | 'Gmail API';
+  sentVia?: 'Simulation' | 'Gmail API' | 'System';
 }
 
 export interface DriverReply {

@@ -20,7 +20,6 @@ import {
   subscribeToDrivers,
   subscribeToEmailLogs,
   subscribeToDriverReplies,
-  addDriver as addDriverToSupabase,
   updateDriver as updateDriverInSupabase,
   deleteDriver as deleteDriverFromSupabase,
   addEmailLog
@@ -184,6 +183,9 @@ const App: React.FC = () => {
   const driverOwnerUserId = authUser?.role === 'employee' && authUser?.adminId
     ? authUser.adminId
     : activeUserId;
+  const rawApiBaseUrl = ((import.meta as any).env.VITE_API_URL || '').trim();
+  const apiBaseUrl = rawApiBaseUrl.replace(/\/+$/, '');
+  const apiUrl = (path: string) => apiBaseUrl ? `${apiBaseUrl}${path}` : path;
 
   // Persist theme
   useEffect(() => {
@@ -650,18 +652,30 @@ const App: React.FC = () => {
   };
 
   const handleAddDriver = async (data: Omit<Driver, 'id' | 'emailSent'>) => {
-    if (!isAdminUser) return;
-    const newD: Driver = {
-      ...data,
-      id: Math.random().toString(36).substr(2, 9),
-      emailSent: false
-    };
-
-    setDrivers(prev => [...prev, newD]);
-
-    // Persist to Supabase
-    if (activeUserId) {
-      await addDriverToSupabase(activeUserId, newD, driverOwnerUserId);
+    if (!activeUserId) return;
+    try {
+      const endpoint = apiUrl('/api/drivers/create');
+      const payload = {
+        acting_user_id: activeUserId,
+        name: data.name,
+        email: data.email,
+        company: data.company,
+        board: isAdminUser ? data.board : (authUser?.assignedBoard || data.board),
+        deviceType: data.deviceType,
+        appVersion: data.appVersion,
+        eldStatus: data.eldStatus,
+        dutyStatus: data.dutyStatus,
+        followUp: data.followUp
+      };
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const responseData = await res.json();
+      if (!res.ok) throw new Error(responseData?.error || `Request failed (${res.status})`);
+    } catch (error: any) {
+      alert(error?.message || 'Failed to create driver.');
     }
   };
 

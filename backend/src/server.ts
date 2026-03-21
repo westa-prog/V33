@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { getDb } from './services/supabaseAdmin';
 import { sendCustomBroadcastEmail } from './services/emailSender';
 
@@ -39,6 +40,7 @@ const normalizeList = (value: unknown): string[] => {
 const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 const ALLOWED_BOARDS = new Set(['Board A', 'Board B', 'Board C']);
+const ADMIN_EMAIL = 'westa@algogroup.us';
 
 const cleanupUploads = (files: Express.Multer.File[] = []) => {
     for (const file of files) {
@@ -151,6 +153,134 @@ app.post('/api/admin/create-user', async (req, res) => {
     } catch (e: any) {
         console.error('[API] Admin create-user failed:', e);
         res.status(500).json({ error: e.message });
+    }
+});
+
+app.post('/api/drivers/create', async (req, res) => {
+    try {
+        const { acting_user_id, name, email, company, board, deviceType, appVersion, eldStatus, dutyStatus, followUp } = req.body || {};
+
+        if (!acting_user_id || !name || !email || !company) {
+            res.status(400).json({ error: 'acting_user_id, name, email, and company are required.' });
+            return;
+        }
+
+        const normalizedActingUserId = String(acting_user_id).trim();
+        const normalizedName = String(name).trim();
+        const normalizedEmail = String(email).trim().toLowerCase();
+        const normalizedCompany = String(company).trim();
+        const normalizedBoardInput = String(board || '').trim();
+
+        if (!isUuid(normalizedActingUserId)) {
+            res.status(400).json({ error: 'A valid acting_user_id is required.' });
+            return;
+        }
+        if (normalizedName.length < 2) {
+            res.status(400).json({ error: 'Driver name must be at least 2 characters.' });
+            return;
+        }
+        if (!isValidEmail(normalizedEmail)) {
+            res.status(400).json({ error: 'A valid driver email is required.' });
+            return;
+        }
+        if (normalizedCompany.length < 2) {
+            res.status(400).json({ error: 'Company is required.' });
+            return;
+        }
+
+        const supabase = getDb();
+        const { data: profile, error: profileError } = await supabase
+            .from('profiles')
+            .select('id, email, name, role, admin_id, assigned_boards, assigned_companies')
+            .eq('id', normalizedActingUserId)
+            .single();
+
+        if (profileError || !profile) {
+            res.status(403).json({ error: 'Unable to resolve acting user profile.' });
+            return;
+        }
+
+        const isAdmin = profile.role === 'admin' || String(profile.email || '').toLowerCase() === ADMIN_EMAIL;
+        const ownerUserId = isAdmin ? profile.id : profile.admin_id;
+        if (!ownerUserId) {
+            res.status(403).json({ error: 'Employee is not mapped to an admin account.' });
+            return;
+        }
+
+        const assignedBoards = Array.isArray(profile.assigned_boards) ? profile.assigned_boards.filter(Boolean) : [];
+        const assignedCompanies = Array.isArray(profile.assigned_companies) ? profile.assigned_companies.filter(Boolean) : [];
+
+        let effectiveBoard = normalizedBoardInput || 'Board A';
+        if (isAdmin) {
+            if (!ALLOWED_BOARDS.has(effectiveBoard)) {
+                res.status(400).json({ error: 'Only Board A, Board B, or Board C are allowed.' });
+                return;
+            }
+        } else {
+            if (assignedBoards.length === 0) {
+                res.status(403).json({ error: 'Employee has no assigned boards.' });
+                return;
+            }
+            effectiveBoard = assignedBoards[0];
+            if (assignedCompanies.length > 0 && !assignedCompanies.includes(normalizedCompany)) {
+                res.status(403).json({ error: 'Employee cannot create drivers outside assigned companies.' });
+                return;
+            }
+        }
+
+        const nowIso = new Date().toISOString();
+        const driverId = crypto.randomUUID();
+        const driverRow = {
+            id: driverId,
+            user_id: ownerUserId,
+            name: normalizedName,
+            email: normalizedEmail,
+            company: normalizedCompany,
+            board: effectiveBoard,
+            devicetype: String(deviceType || ''),
+            appversion: String(appVersion || ''),
+            eldstatus: String(eldStatus || 'Connected'),
+            dutystatus: String(dutyStatus || 'Not Set'),
+            followup: String(followUp || 'None'),
+            emailsent: false,
+            haspendingalert: false,
+            created_at: nowIso,
+            updated_at: nowIso
+        };
+
+        const { error: insertError } = await supabase.from('drivers').insert(driverRow);
+        if (insertError) {
+            res.status(500).json({ error: insertError.message });
+            return;
+        }
+
+        const actorLabel = profile.name || profile.email || profile.id;
+        const activityContent = `[ACTIVITY] ${actorLabel} created driver ${normalizedName} (${normalizedEmail}) in ${normalizedCompany}, ${effectiveBoard}`;
+        await supabase.from('email_logs').insert({
+            id: crypto.randomUUID(),
+            user_id: ownerUserId,
+            driver_id: driverId,
+            driver_name: normalizedName,
+            timestamp: nowIso,
+            status_at_time: String(dutyStatus || 'Not Set'),
+            content: activityContent,
+            sent_via: 'System',
+            type: 'activity'
+        });
+
+        res.json({
+            success: true,
+            driver: {
+                id: driverId,
+                name: normalizedName,
+                email: normalizedEmail,
+                company: normalizedCompany,
+                board: effectiveBoard
+            }
+        });
+    } catch (e: any) {
+        console.error('[API] Driver create failed:', e);
+        res.status(500).json({ error: e.message || 'Failed to create driver.' });
     }
 });
 

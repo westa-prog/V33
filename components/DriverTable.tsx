@@ -208,7 +208,6 @@ export const DriverTable: React.FC<DriverTableProps> = ({
 
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isAdmin) return;
     if (!newDriver.name || !newDriver.email || !newDriver.company) return;
     onAddDriver({ ...newDriver, board: fixedBoard || newDriver.board });
     setIsModalOpen(false);
@@ -231,15 +230,13 @@ export const DriverTable: React.FC<DriverTableProps> = ({
     <div className="space-y-4 relative">
       {/* Action & Filtering Bar */}
       <div className="flex flex-wrap items-center gap-4 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-800 transition-colors">
-        {isAdmin && (
-          <button
-            onClick={() => setIsModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 transition-all shadow-sm active:scale-95"
-          >
-            <UserPlus className="w-4 h-4" />
-            Add Driver
-          </button>
-        )}
+        <button
+          onClick={() => setIsModalOpen(true)}
+          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 transition-all shadow-sm active:scale-95"
+        >
+          <UserPlus className="w-4 h-4" />
+          Add Driver
+        </button>
 
         <div className="h-8 w-px bg-slate-200 dark:bg-slate-700 mx-2 hidden md:block"></div>
 
@@ -634,24 +631,31 @@ export const DriverTable: React.FC<DriverTableProps> = ({
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-neutral-500 dark:text-neutral-400 uppercase mb-1">Company Name</label>
-                  <input
-                    type="text"
+                  <select
                     required
                     value={newDriver.company}
                     onChange={(e) => setNewDriver({ ...newDriver, company: e.target.value })}
-                    placeholder="e.g. Alpha Logistics"
                     className="w-full px-4 py-2 text-sm border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-950 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                  />
+                  >
+                    <option value="">Select company</option>
+                    {companies.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-neutral-500 dark:text-neutral-400 uppercase mb-1">Fleet Board</label>
-                  <select
-                    value={newDriver.board}
-                    onChange={(e) => setNewDriver({ ...newDriver, board: e.target.value })}
-                    className="w-full px-4 py-2 text-sm border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-950 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                  >
-                    {boards.map(b => <option key={b} value={b}>{b}</option>)}
-                  </select>
+                  {isAdmin ? (
+                    <select
+                      value={newDriver.board}
+                      onChange={(e) => setNewDriver({ ...newDriver, board: e.target.value })}
+                      className="w-full px-4 py-2 text-sm border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-950 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                    >
+                      {boards.map(b => <option key={b} value={b}>{b}</option>)}
+                    </select>
+                  ) : (
+                    <div className="w-full px-4 py-2 text-sm border border-slate-200 dark:border-slate-800 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200">
+                      {fixedBoard || 'Board A'}
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="pt-4 flex gap-3">
