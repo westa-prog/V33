@@ -180,6 +180,10 @@ const App: React.FC = () => {
   const [dbConnected, setDbConnected] = useState(false);
   const activeUserId = authUser?.uid;
   const googleClientId = ((window as any).__GOOGLE_CLIENT_ID__ || '').trim();
+  const isAdminUser = authUser?.role === 'admin' || authUser?.email === 'westa@algogroup.us';
+  const driverOwnerUserId = authUser?.role === 'employee' && authUser?.adminId
+    ? authUser.adminId
+    : activeUserId;
 
   // Persist theme
   useEffect(() => {
@@ -285,6 +289,7 @@ const App: React.FC = () => {
           setAuthUser(prev => prev ? {
             ...prev,
             role: profile.role || prev.role,
+            adminId: profile.admin_id || prev.adminId,
             assignedBoards: profile.assigned_boards || prev.assignedBoards,
             assignedBoard: profile.assigned_boards?.[0] || prev.assignedBoard,
             assignedCompanies: profile.assigned_companies || prev.assignedCompanies,
@@ -303,7 +308,7 @@ const App: React.FC = () => {
 
     setupDatabase();
 
-    const unsubDrivers = subscribeToDrivers(activeUserId, (driversSnapshot) => {
+    const unsubDrivers = subscribeToDrivers(driverOwnerUserId || activeUserId, (driversSnapshot) => {
       setDrivers(driversSnapshot);
       setLastSync(new Date().toISOString());
     });
@@ -321,7 +326,7 @@ const App: React.FC = () => {
       unsubLogs();
       unsubReplies();
     };
-  }, [activeUserId, authUser?.email, authUser?.name, user?.accessToken, user?.email, user?.name]);
+  }, [activeUserId, driverOwnerUserId, authUser?.email, authUser?.name, user?.accessToken, user?.email, user?.name]);
 
   // DEBUG CLI: Access via Browser Console
   useEffect(() => {
@@ -629,6 +634,7 @@ const App: React.FC = () => {
   }, [isLiveMode, drivers]);
 
   const handleUpdateDriver = async (id: string, updates: Partial<Driver>) => {
+    if (!isAdminUser) return;
     let updatedDriver: Driver | undefined;
 
     setDrivers(prev => {
@@ -639,11 +645,12 @@ const App: React.FC = () => {
 
     // Persist to Supabase
     if (updatedDriver && activeUserId) {
-      await updateDriverInSupabase(activeUserId, id, updates);
+      await updateDriverInSupabase(activeUserId, id, updates, driverOwnerUserId);
     }
   };
 
   const handleAddDriver = async (data: Omit<Driver, 'id' | 'emailSent'>) => {
+    if (!isAdminUser) return;
     const newD: Driver = {
       ...data,
       id: Math.random().toString(36).substr(2, 9),
@@ -654,16 +661,17 @@ const App: React.FC = () => {
 
     // Persist to Supabase
     if (activeUserId) {
-      await addDriverToSupabase(activeUserId, newD);
+      await addDriverToSupabase(activeUserId, newD, driverOwnerUserId);
     }
   };
 
   const handleDeleteDriver = async (id: string) => {
+    if (!isAdminUser) return;
     setDrivers(prev => prev.filter(d => d.id !== id));
 
     // Persist deletion to Supabase
     if (activeUserId) {
-      await deleteDriverFromSupabase(activeUserId, id);
+      await deleteDriverFromSupabase(activeUserId, id, driverOwnerUserId);
     }
   };
 
@@ -714,7 +722,7 @@ const App: React.FC = () => {
         <Sidebar 
           activeTab={activeTab} 
           setActiveTab={setActiveTab} 
-          isAdmin={authUser.role === 'admin' || authUser.email === 'westa@algogroup.us'} 
+          isAdmin={isAdminUser}
         />
       )}
       
@@ -765,9 +773,11 @@ const App: React.FC = () => {
             <AnimatedText text="Leader Control" as="h2" textClassName="text-3xl text-slate-900 dark:text-white" underlineGradient="from-indigo-600 to-purple-600 dark:from-indigo-400 dark:to-purple-400" underlineHeight="h-[3px]" underlineOffset="-bottom-2" className="items-start" />
             <p className="text-slate-500 text-sm mt-3">Welcome back, {authUser?.name || 'Guest'}</p>
           </div>
-          <button onClick={handleGlobalReset} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold shadow-md hover:bg-indigo-700">
-            <Zap className="w-4 h-4" /> Reset All
-          </button>
+          {isAdminUser && (
+            <button onClick={handleGlobalReset} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold shadow-md hover:bg-indigo-700">
+              <Zap className="w-4 h-4" /> Reset All
+            </button>
+          )}
         </header>
 
         {activeTab === 'Dashboard' && <Dashboard drivers={filteredDrivers} assignedBoard={authUser?.assignedBoard} />}
@@ -789,6 +799,8 @@ const App: React.FC = () => {
                 onDeleteDriver={handleDeleteDriver}
                 onManualSendEmail={handleManualSendEmail}
                 onResetDriver={handleResetDriver}
+                isAdmin={isAdminUser}
+                fixedBoard={authUser?.assignedBoard}
               />
             </div>
           </div>

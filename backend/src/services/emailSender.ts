@@ -101,9 +101,11 @@ export const sendCustomBroadcastEmail = async (
     if (to.length === 0) return false;
 
     try {
+        const singleRecipient = to.length === 1;
         const mailOptions = {
             from: FROM,
-            bcc: to,
+            to: singleRecipient ? to[0] : undefined,
+            bcc: singleRecipient ? undefined : to,
             subject,
             html: htmlContent,
             attachments

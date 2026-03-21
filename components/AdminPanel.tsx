@@ -47,9 +47,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+      if (!res.ok) {
+        if (data?.userCreated) {
+          throw new Error(`${data?.error} Login email: ${data?.loginEmail}`);
+        }
+        throw new Error(data?.error || `Request failed (${res.status})`);
+      }
       
-      setMessage({ type: 'success', text: `Successfully created ${username}. Credentials emailed to ${currentUser.email}.` });
+      setMessage({ type: 'success', text: `Successfully created ${username}. Credentials sent to ${currentUser.email}.` });
       setUsername('');
       setPassword('');
       setSelectedBoards([]);

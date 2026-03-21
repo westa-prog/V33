@@ -6,6 +6,7 @@ export interface UserProfile {
     email: string;
     name?: string | null;
     role?: string | null;
+    admin_id?: string | null;
     assigned_boards?: string[] | null;
     assigned_companies?: string[] | null;
 }
@@ -23,7 +24,7 @@ export const initializeUserDatabase = async (userId: string, userEmail: string, 
 export const fetchUserProfile = async (userId: string): Promise<UserProfile | null> => {
     const { data, error } = await supabase
         .from('profiles')
-        .select('id, email, name, role, assigned_boards, assigned_companies')
+        .select('id, email, name, role, admin_id, assigned_boards, assigned_companies')
         .eq('id', userId)
         .single();
 
@@ -113,22 +114,23 @@ export const fetchDrivers = async (userId: string): Promise<Driver[]> => {
 /**
  * Add a new driver
  */
-export const addDriver = async (userId: string, driver: Driver) => {
-    await supabase.from('drivers').insert(mapDriverToDb(userId, driver));
+export const addDriver = async (userId: string, driver: Driver, ownerId?: string) => {
+    await supabase.from('drivers').insert(mapDriverToDb(ownerId || userId, driver));
 };
 
 /**
  * Bulk add drivers (for Google Sheets import)
  */
-export const bulkAddDrivers = async (userId: string, drivers: Driver[]) => {
-    await supabase.from('drivers').insert(drivers.map(d => mapDriverToDb(userId, d)));
+export const bulkAddDrivers = async (userId: string, drivers: Driver[], ownerId?: string) => {
+    await supabase.from('drivers').insert(drivers.map(d => mapDriverToDb(ownerId || userId, d)));
 };
 
 /**
  * Update an existing driver
  */
-export const updateDriver = async (userId: string, driverId: string, updates: Partial<Driver>) => {
-    const { id, user_id, ...dbUpdates } = mapDriverToDb(userId, updates) as any;
+export const updateDriver = async (userId: string, driverId: string, updates: Partial<Driver>, ownerId?: string) => {
+    const effectiveOwnerId = ownerId || userId;
+    const { id, user_id, ...dbUpdates } = mapDriverToDb(effectiveOwnerId, updates) as any;
 
     // Filter out undefined values
     const cleanUpdates = Object.fromEntries(Object.entries(dbUpdates).filter(([_, v]) => v !== undefined));
@@ -136,14 +138,15 @@ export const updateDriver = async (userId: string, driverId: string, updates: Pa
     await supabase.from('drivers').update({
         ...cleanUpdates,
         updated_at: new Date().toISOString()
-    }).eq('id', driverId).eq('user_id', userId);
+    }).eq('id', driverId).eq('user_id', effectiveOwnerId);
 };
 
 /**
  * Delete a driver
  */
-export const deleteDriver = async (userId: string, driverId: string) => {
-    await supabase.from('drivers').delete().eq('id', driverId).eq('user_id', userId);
+export const deleteDriver = async (userId: string, driverId: string, ownerId?: string) => {
+    const effectiveOwnerId = ownerId || userId;
+    await supabase.from('drivers').delete().eq('id', driverId).eq('user_id', effectiveOwnerId);
 };
 
 const mapLogToDb = (userId: string, log: EmailLogEntry) => ({
@@ -221,13 +224,13 @@ export const addDriverReply = async (userId: string, reply: DriverReply) => {
 /**
  * Subscribe to real-time driver updates
  */
-export const subscribeToDrivers = (userId: string, callback: (drivers: Driver[]) => void) => {
+export const subscribeToDrivers = (ownerUserId: string, callback: (drivers: Driver[]) => void) => {
     // First, fetch initial list
-    fetchDrivers(userId).then(callback);
+    fetchDrivers(ownerUserId).then(callback);
 
-    const channel = supabase.channel(`public:drivers:user_id=eq.${userId}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'drivers', filter: `user_id=eq.${userId}` }, async () => {
-            const updated = await fetchDrivers(userId);
+    const channel = supabase.channel(`public:drivers:user_id=eq.${ownerUserId}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'drivers', filter: `user_id=eq.${ownerUserId}` }, async () => {
+            const updated = await fetchDrivers(ownerUserId);
             callback(updated);
         })
         .subscribe();

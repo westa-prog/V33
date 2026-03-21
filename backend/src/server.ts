@@ -137,11 +137,17 @@ app.post('/api/admin/create-user', async (req, res) => {
             </div>
         `;
 
-        sendCustomBroadcastEmail([normalizedAdminEmail], subject, message, []).catch(e => {
-            console.error('[EMAIL] Failed to send credentials to admin', e);
-        });
+        const credentialEmailSent = await sendCustomBroadcastEmail([normalizedAdminEmail], subject, message, []);
+        if (!credentialEmailSent) {
+            res.status(502).json({
+                error: 'User created, but failed to send credential email to admin.',
+                userCreated: true,
+                loginEmail: pseudoEmail
+            });
+            return;
+        }
 
-        res.json({ success: true, user: data.user, loginEmail: pseudoEmail });
+        res.json({ success: true, user: data.user, loginEmail: pseudoEmail, credentialEmailSent: true });
     } catch (e: any) {
         console.error('[API] Admin create-user failed:', e);
         res.status(500).json({ error: e.message });
