@@ -38,6 +38,18 @@ const STORAGE_KEYS = {
   liveMode: 'app_live_mode'
 };
 
+const readJsonStorage = <T,>(key: string, fallback: T): T => {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw) as T;
+  } catch (error) {
+    console.warn(`[STORAGE] Invalid JSON in key "${key}". Resetting to fallback.`, error);
+    localStorage.removeItem(key);
+    return fallback;
+  }
+};
+
 const buildFollowUpEmail = (driverName: string) => {
   const subject = `ELD Disconnected - Action Required`;
   const body =
@@ -124,18 +136,9 @@ const BrandLogo = ({ open, onToggle, theme, onToggleTheme }: { open: boolean, on
 );
 
 const App: React.FC = () => {
-  const [drivers, setDrivers] = useState<Driver[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.drivers);
-    return saved ? JSON.parse(saved) : INITIAL_DRIVERS;
-  });
-  const [emailLogs, setEmailLogs] = useState<EmailLogEntry[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.emailLogs);
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [driverReplies, setDriverReplies] = useState<DriverReply[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.driverReplies);
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [drivers, setDrivers] = useState<Driver[]>(() => readJsonStorage(STORAGE_KEYS.drivers, INITIAL_DRIVERS));
+  const [emailLogs, setEmailLogs] = useState<EmailLogEntry[]>(() => readJsonStorage(STORAGE_KEYS.emailLogs, []));
+  const [driverReplies, setDriverReplies] = useState<DriverReply[]>(() => readJsonStorage(STORAGE_KEYS.driverReplies, []));
   const [activeTab, setActiveTab] = useState('Dashboard');
   const [isResetting, setIsResetting] = useState(false);
   const [expandedLogs, setExpandedLogs] = useState<Set<string>>(new Set());
@@ -151,32 +154,26 @@ const App: React.FC = () => {
   const [companyFilter, setCompanyFilter] = useState<string | 'ALL'>('ALL');
   const [boardFilter, setBoardFilter] = useState<string | 'ALL'>(() => {
     // On initial load, respect the stored authUser's assigned board if present.
-    const saved = localStorage.getItem('auth_user');
-    if (saved) {
-      const parsed: AuthUser = JSON.parse(saved);
-      if (parsed.assignedBoard) return parsed.assignedBoard;
-    }
+    const parsed = readJsonStorage<AuthUser | null>('auth_user', null);
+    if (parsed?.assignedBoard) return parsed.assignedBoard;
     return 'ALL';
   });
 
   const [authUser, setAuthUser] = useState<AuthUser | null>(() => {
-    const saved = localStorage.getItem('auth_user');
-    return saved ? JSON.parse(saved) : null;
+    return readJsonStorage<AuthUser | null>('auth_user', null);
   });
 
 
   const [user, setUser] = useState<GoogleUser | null>(() => {
-    const saved = localStorage.getItem('google_user');
-    if (!saved) return null;
-    const parsed = JSON.parse(saved);
+    const parsed = readJsonStorage<GoogleUser | null>('google_user', null);
+    if (!parsed) return null;
     if (Date.now() > parsed.expiry) return null;
     return parsed;
   });
 
   // Database and sync state
   const [isLiveMode, setIsLiveMode] = useState<boolean>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.liveMode);
-    return saved ? JSON.parse(saved) : false;
+    return readJsonStorage(STORAGE_KEYS.liveMode, false);
   });
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<string | undefined>();
