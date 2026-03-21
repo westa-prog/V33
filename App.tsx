@@ -200,6 +200,15 @@ const App: React.FC = () => {
     }
   }, [authUser]);
 
+  // Persist Google OAuth session to survive refresh
+  useEffect(() => {
+    if (user) {
+      localStorage.setItem('google_user', JSON.stringify(user));
+    } else {
+      localStorage.removeItem('google_user');
+    }
+  }, [user]);
+
   useEffect(() => {
     const syncAuthUser = async () => {
       const { data } = await supabase.auth.getSession();
