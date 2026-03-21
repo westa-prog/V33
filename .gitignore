@@ -29,3 +29,8 @@ node_modules
 
 .vercel
 .env*.local
+uploads
+backend/dist
+backend/node_modules
+backend/uploads
+backend/*.txt

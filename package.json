@@ -3,10 +3,18 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=20 <23"
+  },
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "dev:server": "npm --prefix backend run dev",
+    "build:client": "vite build",
+    "build:server": "npm --prefix backend run build",
+    "build": "npm run build:client && npm run build:server",
+    "render-build": "npm install && npm --prefix backend install && npm run build",
+    "preview": "vite preview",
+    "start": "npm --prefix backend run start"
   },
   "dependencies": {
     "@google/genai": "^1.4.0",
@@ -20,7 +28,6 @@
     "axios": "^1.13.6",
     "class-variance-authority": "^0.7.1",
     "clsx": "2.1.1",
-    "firebase": "^12.9.0",
     "framer-motion": "11.11.11",
     "lucide-react": "0.460.0",
     "maplibre-gl": "^5.20.1",

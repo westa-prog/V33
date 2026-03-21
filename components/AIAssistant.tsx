@@ -5,6 +5,7 @@ import { GoogleGenAI } from "@google/genai";
 import { motion, AnimatePresence } from 'framer-motion';
 import { PromptInputBox } from './ui/ai-prompt-box';
 import { HeroGeometricContent } from './ui/shape-landing-hero';
+import { addAIMessage, clearAIThread, fetchAIMessages } from '../services/aiAssistantService';
 
 interface Message {
   id: string;
@@ -13,16 +14,23 @@ interface Message {
   timestamp: Date;
 }
 
-export const AIAssistant: React.FC = () => {
+interface AIAssistantProps {
+  userId?: string;
+}
+
+const initialAssistantMessage = (): Message => ({
+  id: 'assistant-welcome',
+  role: 'assistant',
+  text: "Hello! I'm your Leader A1 AI Assistant. I can help you analyze fleet compliance, draft driver notices, or answer questions about ELD regulations. How can I assist you today?",
+  timestamp: new Date()
+});
+
+export const AIAssistant: React.FC<AIAssistantProps> = ({ userId }) => {
   const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      role: 'assistant',
-      text: "Hello! I'm your Leader A1 AI Assistant. I can help you analyze fleet compliance, draft driver notices, or answer questions about ELD regulations. How can I assist you today?",
-      timestamp: new Date()
-    }
+    initialAssistantMessage()
   ]);
   const [isLoading, setIsLoading] = useState(false);
+  const [hasLoadedThread, setHasLoadedThread] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -33,8 +41,51 @@ export const AIAssistant: React.FC = () => {
     scrollToBottom();
   }, [messages, isLoading]);
 
+  useEffect(() => {
+    let isActive = true;
+
+    const loadMessages = async () => {
+      if (!userId) {
+        setMessages([initialAssistantMessage()]);
+        setHasLoadedThread(true);
+        return;
+      }
+
+      try {
+        const storedMessages = await fetchAIMessages(userId);
+        if (!isActive) return;
+
+        if (storedMessages.length === 0) {
+          setMessages([initialAssistantMessage()]);
+        } else {
+          setMessages(storedMessages.map(message => ({
+            id: message.id,
+            role: message.role,
+            text: message.text,
+            timestamp: new Date(message.createdAt)
+          })));
+        }
+      } catch (error) {
+        console.error('Failed to load AI thread:', error);
+        if (isActive) {
+          setMessages([initialAssistantMessage()]);
+        }
+      } finally {
+        if (isActive) {
+          setHasLoadedThread(true);
+        }
+      }
+    };
+
+    loadMessages();
+
+    return () => {
+      isActive = false;
+    };
+  }, [userId]);
+
   const handleSend = async (messageText: string, files?: File[]) => {
-    if (!messageText.trim() || isLoading) return;
+    if (!messageText.trim() || isLoading || !userId) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -47,6 +98,8 @@ export const AIAssistant: React.FC = () => {
     setIsLoading(true);
 
     try {
+      await addAIMessage(userId, 'user', messageText);
+
       const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
 
       const chat = ai.chats.create({
@@ -66,6 +119,7 @@ export const AIAssistant: React.FC = () => {
         timestamp: new Date()
       };
 
+      await addAIMessage(userId, 'assistant', responseText);
       setMessages(prev => [...prev, aiMessage]);
     } catch (error) {
       console.error("AI Error:", error);
@@ -81,7 +135,15 @@ export const AIAssistant: React.FC = () => {
     }
   };
 
-  const clearChat = () => {
+  const clearChat = async () => {
+    if (userId) {
+      try {
+        await clearAIThread(userId);
+      } catch (error) {
+        console.error('Failed to clear AI thread:', error);
+      }
+    }
+
     setMessages([{
       id: Date.now().toString(),
       role: 'assistant',
@@ -96,6 +158,17 @@ export const AIAssistant: React.FC = () => {
     "Analyze fleet risk",
     "Write a reconnection guide"
   ];
+
+  if (!hasLoadedThread) {
+    return (
+      <div className="flex items-center justify-center h-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950">
+        <div className="flex items-center gap-3 text-slate-500 dark:text-slate-400">
+          <Loader2 className="w-5 h-5 animate-spin" />
+          <span className="text-sm font-semibold">Loading AI workspace...</span>
+        </div>
+      </div>
+    );
+  }
 
   const isInitialState = messages.length <= 1;
 

@@ -6,11 +6,11 @@ import { sendGmailBroadcast } from '../services/gmailService';
 interface EmailBroadcastProps {
     drivers: Driver[];
     assignedBoard?: string;
-    firebaseUid?: string;
+    userId?: string;
     userAccessToken?: string;
 }
 
-export const EmailBroadcast: React.FC<EmailBroadcastProps> = ({ drivers, assignedBoard, firebaseUid, userAccessToken }) => {
+export const EmailBroadcast: React.FC<EmailBroadcastProps> = ({ drivers, assignedBoard, userId, userAccessToken }) => {
     const rawApiBaseUrl = ((import.meta as any).env.VITE_API_URL || '').trim();
     const apiBaseUrl = rawApiBaseUrl.replace(/\/+$/, '');
     const apiUrl = (path: string) => apiBaseUrl ? `${apiBaseUrl}${path}` : path;
@@ -73,7 +73,7 @@ export const EmailBroadcast: React.FC<EmailBroadcastProps> = ({ drivers, assigne
     const handleBroadcast = async () => {
         if (selectedDrivers.length === 0) return alert('Please select at least one recipient.');
         if (!subject.trim() || !message.trim()) return alert('Subject and Message are required.');
-        if (!firebaseUid) return alert('You must be logged in to send broadcasts.');
+        if (!userId) return alert('You must be logged in to send broadcasts.');
 
         setIsSending(true);
         setSendSuccess(false);
@@ -103,7 +103,7 @@ export const EmailBroadcast: React.FC<EmailBroadcastProps> = ({ drivers, assigne
                     formData.append('attachments', file);
                 });
 
-                const res = await fetch(apiUrl('/api/eld/broadcast'), {
+                const res = await fetch(apiUrl('/api/broadcast'), {
                     method: 'POST',
                     body: formData
                 });

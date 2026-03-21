@@ -11,10 +11,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
   const apiBaseUrl = rawApiBaseUrl.replace(/\/+$/, '');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  
-  // They can type comma separated boards/companies
-  const [boardsInput, setBoardsInput] = useState('');
-  const [companiesInput, setCompaniesInput] = useState('');
+  const [selectedBoards, setSelectedBoards] = useState<string[]>([]);
   
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'error' | 'success', text: string } | null>(null);
@@ -29,8 +26,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
     setLoading(true);
     setMessage(null);
 
-    const assigned_boards = boardsInput.split(',').map(s => s.trim()).filter(Boolean);
-    const assigned_companies = companiesInput.split(',').map(s => s.trim()).filter(Boolean);
+    const assigned_boards = selectedBoards;
+    const assigned_companies: string[] = [];
 
     try {
       const payload = JSON.stringify({
@@ -42,43 +39,32 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
         assigned_companies
       });
 
-      const endpoints = [
-        apiBaseUrl ? `${apiBaseUrl}/api/admin/create-user` : '',
-        apiBaseUrl ? `${apiBaseUrl}/api/admin-create-user` : '',
-        '/api/admin-create-user'
-      ].filter(Boolean);
+      const endpoint = apiBaseUrl ? `${apiBaseUrl}/api/admin/create-user` : '/api/admin/create-user';
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload
+      });
 
-      let data: any = null;
-      let lastError = 'Failed to create user';
-
-      for (const url of endpoints) {
-        try {
-          const res = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: payload
-          });
-          data = await res.json();
-          if (res.ok) break;
-          lastError = data?.error || `Request failed (${res.status})`;
-        } catch (err: any) {
-          lastError = err?.message || 'Network request failed';
-        }
-      }
-
-      if (!data?.success) throw new Error(lastError);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
       
       setMessage({ type: 'success', text: `Successfully created ${username}. Credentials emailed to ${currentUser.email}.` });
       setUsername('');
       setPassword('');
-      setBoardsInput('');
-      setCompaniesInput('');
+      setSelectedBoards([]);
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message });
     } finally {
       setLoading(false);
     }
   };
+
+  const toggleBoard = (board: string) => {
+    setSelectedBoards(prev => prev.includes(board) ? prev.filter(b => b !== board) : [...prev, board]);
+  };
+
+  const boardOptions = ['Board A', 'Board B', 'Board C'];
 
   return (
     <div className="max-w-2xl mx-auto mt-8">
@@ -124,25 +110,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
               </div>
 
               <div className="space-y-2">
-                 <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Assigned Boards (Comma Separated)</label>
-                 <input 
-                   className="w-full px-4 py-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
-                   value={boardsInput}
-                   onChange={e => setBoardsInput(e.target.value)}
-                   placeholder="e.g. Board A, Night Shift"
-                 />
-                 <p className="text-xs text-slate-400">Leave blank to grant access to all boards.</p>
-              </div>
-
-              <div className="space-y-2">
-                 <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Assigned Companies (Comma Separated)</label>
-                 <input 
-                   className="w-full px-4 py-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
-                   value={companiesInput}
-                   onChange={e => setCompaniesInput(e.target.value)}
-                   placeholder="e.g. Amazon, FedEx"
-                 />
-                 <p className="text-xs text-slate-400">Leave blank to grant access to all companies.</p>
+                 <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Assign Boards</label>
+                 <div className="grid grid-cols-3 gap-2">
+                  {boardOptions.map(board => {
+                    const isSelected = selectedBoards.includes(board);
+                    return (
+                      <button
+                        key={board}
+                        type="button"
+                        onClick={() => toggleBoard(board)}
+                        className={`px-3 py-2 rounded-lg text-sm font-semibold border transition-all ${
+                          isSelected
+                            ? 'bg-indigo-600 text-white border-indigo-600'
+                            : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-700'
+                        }`}
+                      >
+                        {board}
+                      </button>
+                    );
+                  })}
+                 </div>
+                 <p className="text-xs text-slate-400">Leave all unselected to grant access to all boards.</p>
               </div>
 
               <button 

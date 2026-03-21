@@ -1,6 +1,15 @@
 import { supabase } from '../supabase';
 import { Driver, EmailLogEntry, DriverReply } from '../types';
 
+export interface UserProfile {
+    id: string;
+    email: string;
+    name?: string | null;
+    role?: string | null;
+    assigned_boards?: string[] | null;
+    assigned_companies?: string[] | null;
+}
+
 /**
  * Initialize user database on first login
  * In Supabase, the profile is created via a trigger, so we just check it exists.
@@ -9,6 +18,20 @@ export const initializeUserDatabase = async (userId: string, userEmail: string, 
     // A profile should already exist from the auth trigger, but we'll fetch it to confirm.
     const { data } = await supabase.from('profiles').select('id').eq('id', userId).single();
     return !!data;
+};
+
+export const fetchUserProfile = async (userId: string): Promise<UserProfile | null> => {
+    const { data, error } = await supabase
+        .from('profiles')
+        .select('id, email, name, role, assigned_boards, assigned_companies')
+        .eq('id', userId)
+        .single();
+
+    if (error) {
+        return null;
+    }
+
+    return data as UserProfile;
 };
 
 /**

@@ -16,26 +16,30 @@ import { AdminPanel } from './components/AdminPanel';
 import { generateComplianceEmail, generateDriverReply } from './services/geminiService';
 import {
   initializeUserDatabase,
+  fetchUserProfile,
   subscribeToDrivers,
   subscribeToEmailLogs,
   subscribeToDriverReplies,
   addDriver as addDriverToSupabase,
   updateDriver as updateDriverInSupabase,
   deleteDriver as deleteDriverFromSupabase,
-  addEmailLog,
-  addDriverReply,
-  hasImportedFromSheets,
-  markSheetsImported,
-  bulkAddDrivers
+  addEmailLog
 } from './services/supabaseService';
-import { fetchSheetData } from './services/sheetService';
 import { sendGmailMessage, fetchGmailReplies } from './services/gmailService';
 import { Sidebar } from './components/Sidebar';
 import { AnimatedText } from './components/ui/animated-text';
 import { HeroBackground } from './components/ui/shape-landing-hero';
+import { supabase } from './supabase';
+
+const STORAGE_KEYS = {
+  drivers: 'app_drivers',
+  emailLogs: 'app_email_logs',
+  driverReplies: 'app_driver_replies',
+  liveMode: 'app_live_mode'
+};
 
 const buildFollowUpEmail = (driverName: string) => {
-  const subject = `ELD Disconnected – Action Required`;
+  const subject = `ELD Disconnected - Action Required`;
   const body =
     `Hi ${driverName},\n\n` +
     `Your ELD is showing as DISCONNECTED.\n` +
@@ -121,15 +125,15 @@ const BrandLogo = ({ open, onToggle, theme, onToggleTheme }: { open: boolean, on
 
 const App: React.FC = () => {
   const [drivers, setDrivers] = useState<Driver[]>(() => {
-    const saved = localStorage.getItem('eld_drivers');
+    const saved = localStorage.getItem(STORAGE_KEYS.drivers);
     return saved ? JSON.parse(saved) : INITIAL_DRIVERS;
   });
   const [emailLogs, setEmailLogs] = useState<EmailLogEntry[]>(() => {
-    const saved = localStorage.getItem('eld_email_logs');
+    const saved = localStorage.getItem(STORAGE_KEYS.emailLogs);
     return saved ? JSON.parse(saved) : [];
   });
   const [driverReplies, setDriverReplies] = useState<DriverReply[]>(() => {
-    const saved = localStorage.getItem('eld_driver_replies');
+    const saved = localStorage.getItem(STORAGE_KEYS.driverReplies);
     return saved ? JSON.parse(saved) : [];
   });
   const [activeTab, setActiveTab] = useState('Dashboard');
@@ -171,12 +175,13 @@ const App: React.FC = () => {
 
   // Database and sync state
   const [isLiveMode, setIsLiveMode] = useState<boolean>(() => {
-    const saved = localStorage.getItem('eld_live_mode');
+    const saved = localStorage.getItem(STORAGE_KEYS.liveMode);
     return saved ? JSON.parse(saved) : false;
   });
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<string | undefined>();
   const [dbConnected, setDbConnected] = useState(false);
+  const activeUserId = authUser?.uid;
 
   // Persist theme
   useEffect(() => {
@@ -197,95 +202,119 @@ const App: React.FC = () => {
     }
   }, [authUser]);
 
+  useEffect(() => {
+    const syncAuthUser = async () => {
+      const { data } = await supabase.auth.getSession();
+      const sessionUser = data.session?.user;
+
+      if (!sessionUser) {
+        setAuthUser(null);
+        return;
+      }
+
+      setAuthUser(prev => ({
+        ...prev,
+        uid: sessionUser.id,
+        email: sessionUser.email || prev?.email || '',
+        name: (sessionUser.user_metadata?.full_name as string) || prev?.name || sessionUser.email?.split('@')[0] || 'User'
+      }));
+    };
+
+    syncAuthUser();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      const sessionUser = session?.user;
+      if (!sessionUser) {
+        setAuthUser(null);
+        return;
+      }
+
+      setAuthUser(prev => ({
+        ...prev,
+        uid: sessionUser.id,
+        email: sessionUser.email || prev?.email || '',
+        name: (sessionUser.user_metadata?.full_name as string) || prev?.name || sessionUser.email?.split('@')[0] || 'User'
+      }));
+    });
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
   // Persist drivers and logs to localStorage on every change
   useEffect(() => {
-    localStorage.setItem('eld_drivers', JSON.stringify(drivers));
+    localStorage.setItem(STORAGE_KEYS.drivers, JSON.stringify(drivers));
   }, [drivers]);
 
   useEffect(() => {
-    localStorage.setItem('eld_email_logs', JSON.stringify(emailLogs));
+    localStorage.setItem(STORAGE_KEYS.emailLogs, JSON.stringify(emailLogs));
   }, [emailLogs]);
 
   useEffect(() => {
-    localStorage.setItem('eld_driver_replies', JSON.stringify(driverReplies));
+    localStorage.setItem(STORAGE_KEYS.driverReplies, JSON.stringify(driverReplies));
   }, [driverReplies]);
 
   // Persist live mode setting
   useEffect(() => {
-    localStorage.setItem('eld_live_mode', JSON.stringify(isLiveMode));
+    localStorage.setItem(STORAGE_KEYS.liveMode, JSON.stringify(isLiveMode));
   }, [isLiveMode]);
 
-  // Initialize user database and set up Firestore listeners
+  // Initialize user profile and set up Supabase listeners
   useEffect(() => {
-    const activeUid = user?.uid || authUser?.uid;
-    if (!activeUid) {
+    if (!activeUserId) {
       setDbConnected(false);
       return;
     }
 
     const setupDatabase = async () => {
       try {
-        // Initialize user database on first login
         const activeEmail = user?.email || authUser?.email || '';
         const activeName = user?.name || authUser?.name || '';
-        const isExistingUser = await initializeUserDatabase(activeUid, activeEmail, activeName);
-        setDbConnected(true);
-        console.log('✅ Database connected for user:', activeEmail);
+        await initializeUserDatabase(activeUserId, activeEmail, activeName);
+        const profile = await fetchUserProfile(activeUserId);
 
-        // Check if we need to import from Google Sheets (one-time)
-        if (!isExistingUser && user?.accessToken) {
-          const hasImported = await hasImportedFromSheets(activeUid);
-
-          if (!hasImported) {
-            console.log('📥 First login detected - importing from Google Sheets...');
-            const sheetId = '10kXJzrMhRqe_39J_HrqX3RwbhZSa09edS6GPlEBn1BY'; // Your sheet ID
-
-            try {
-              const sheetDrivers = await fetchSheetData(sheetId, user.accessToken !== 'demo_token' ? user.accessToken : undefined);
-
-              if (sheetDrivers.length > 0) {
-                await bulkAddDrivers(activeUid, sheetDrivers);
-                await markSheetsImported(activeUid);
-                console.log(`✅ Imported ${sheetDrivers.length} drivers from Google Sheets`);
-              }
-            } catch (importErr) {
-              console.warn('⚠️ Could not import from Google Sheets (sheet may be private or empty):', importErr);
-              // Mark as imported anyway to avoid retrying on every login
-              await markSheetsImported(activeUid);
-            }
-          }
+        if (profile) {
+          setAuthUser(prev => prev ? {
+            ...prev,
+            role: profile.role || prev.role,
+            assignedBoards: profile.assigned_boards || prev.assignedBoards,
+            assignedBoard: profile.assigned_boards?.[0] || prev.assignedBoard,
+            assignedCompanies: profile.assigned_companies || prev.assignedCompanies,
+            name: profile.name || prev.name,
+            email: profile.email || prev.email
+          } : prev);
         }
+
+        setDbConnected(true);
+        console.log('Database connected for user:', activeEmail);
       } catch (err) {
-        console.error('❌ Database initialization error:', err);
+        console.error('Database initialization error:', err);
         setDbConnected(false);
       }
     };
 
     setupDatabase();
 
-    // Subscribe to real-time driver updates
-    const unsubDrivers = subscribeToDrivers(activeUid, (firestoreDrivers) => {
-      setDrivers(firestoreDrivers);
+    const unsubDrivers = subscribeToDrivers(activeUserId, (driversSnapshot) => {
+      setDrivers(driversSnapshot);
       setLastSync(new Date().toISOString());
     });
 
-    // Subscribe to real-time email log updates
-    const unsubLogs = subscribeToEmailLogs(activeUid, (firestoreLogs) => {
-      setEmailLogs(firestoreLogs);
+    const unsubLogs = subscribeToEmailLogs(activeUserId, (emailLogSnapshot) => {
+      setEmailLogs(emailLogSnapshot);
     });
 
-    // Subscribe to real-time driver reply updates
-    const unsubReplies = subscribeToDriverReplies(activeUid, (firestoreReplies) => {
-      setDriverReplies(firestoreReplies);
+    const unsubReplies = subscribeToDriverReplies(activeUserId, (driverReplySnapshot) => {
+      setDriverReplies(driverReplySnapshot);
     });
 
-    // Cleanup subscriptions on unmount or user change
     return () => {
       unsubDrivers();
       unsubLogs();
       unsubReplies();
     };
-  }, [user?.uid, user?.accessToken, authUser?.uid]);
+  }, [activeUserId, authUser?.email, authUser?.name, user?.accessToken, user?.email, user?.name]);
 
   // DEBUG CLI: Access via Browser Console
   useEffect(() => {
@@ -318,8 +347,8 @@ const App: React.FC = () => {
         };
 
         setUser(googleUser);
-        setAuthUser({ email: data.email, name: data.name, picture: data.picture });
-        setIsLiveMode(true); // ✅ Auto-enable Live Mode on login
+        setAuthUser(prev => ({ ...prev, email: data.email, name: data.name, picture: data.picture }));
+        setIsLiveMode(true);
         alert("Success: Google API Connected and Live Mode Enabled!");
       } catch (error) {
         console.error("Failed to fetch user info", error);
@@ -334,23 +363,21 @@ const App: React.FC = () => {
   });
 
   const handleLogout = () => {
-    // Reset ALL user state
     setAuthUser(null);
     setUser(null);
-    // Reset ALL filter states so the next login starts fresh
+    supabase.auth.signOut().catch((error) => console.error('Sign-out failed:', error));
     setBoardFilter('ALL');
     setCompanyFilter('ALL');
     setEldFilter('ALL');
     setDutyFilter('ALL');
     setSearchQuery('');
     setIsLiveMode(false);
-    // Clear ALL registered localStorage keys so no data leaks between accounts
     localStorage.removeItem('auth_user');
     localStorage.removeItem('google_user');
-    localStorage.removeItem('eld_drivers');
-    localStorage.removeItem('eld_email_logs');
-    localStorage.removeItem('eld_driver_replies');
-    localStorage.removeItem('eld_live_mode');
+    localStorage.removeItem(STORAGE_KEYS.drivers);
+    localStorage.removeItem(STORAGE_KEYS.emailLogs);
+    localStorage.removeItem(STORAGE_KEYS.driverReplies);
+    localStorage.removeItem(STORAGE_KEYS.liveMode);
   };
 
   const filteredDrivers = useMemo(() => {
@@ -360,12 +387,16 @@ const App: React.FC = () => {
       const matchesDuty = dutyFilter === 'ALL' || driver.dutyStatus === dutyFilter;
       const matchesCompany = companyFilter === 'ALL' || driver.company === companyFilter;
       
-      // Strict RBAC Override: If authUser is assigned to a specific board, forcefully filter it
-      const matchesBoard = (authUser?.assignedBoard)
-        ? driver.board === authUser.assignedBoard
+      const allowedBoards = authUser?.assignedBoards || (authUser?.assignedBoard ? [authUser.assignedBoard] : []);
+      const allowedCompanies = authUser?.assignedCompanies || [];
+      const matchesBoard = allowedBoards.length > 0
+        ? allowedBoards.includes(driver.board)
         : (boardFilter === 'ALL' || driver.board === boardFilter);
-        
-      return matchesName && matchesEld && matchesDuty && matchesCompany && matchesBoard;
+      const matchesAssignedCompany = allowedCompanies.length > 0
+        ? allowedCompanies.includes(driver.company)
+        : true;
+
+      return matchesName && matchesEld && matchesDuty && matchesCompany && matchesBoard && matchesAssignedCompany;
     });
   }, [drivers, searchQuery, eldFilter, dutyFilter, companyFilter, boardFilter, authUser]);
 
@@ -452,9 +483,9 @@ const App: React.FC = () => {
     setEmailLogs(prev => [logEntry, ...prev]);
 
     // Persist to Supabase
-    if (user?.uid) {
-      await updateDriverInSupabase(user.uid, driver.id, updatedDriver);
-      await addEmailLog(user.uid, logEntry);
+    if (activeUserId) {
+      await updateDriverInSupabase(activeUserId, driver.id, updatedDriver);
+      await addEmailLog(activeUserId, logEntry);
     }
 
     return { sentAt };
@@ -508,9 +539,9 @@ const App: React.FC = () => {
 
     setEmailLogs(prev => [logEntry, ...prev]);
 
-    if (user?.uid) {
-      await updateDriverInSupabase(user.uid, driver.id, updatePayload);
-      await addEmailLog(user.uid, logEntry);
+    if (activeUserId) {
+      await updateDriverInSupabase(activeUserId, driver.id, updatePayload);
+      await addEmailLog(activeUserId, logEntry);
     }
   };
 
@@ -521,8 +552,8 @@ const App: React.FC = () => {
     const updatePayload = { lastPFUpdate: dateStr };
     setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, ...updatePayload } : d));
 
-    if (user?.uid) {
-      await updateDriverInSupabase(user.uid, driverId, updatePayload);
+    if (activeUserId) {
+      await updateDriverInSupabase(activeUserId, driverId, updatePayload);
     }
   };
 
@@ -555,8 +586,8 @@ const App: React.FC = () => {
 
     setEmailLogs(prev => [logEntry, ...prev]);
 
-    if (user?.uid) {
-      await addEmailLog(user.uid, logEntry);
+    if (activeUserId) {
+      await addEmailLog(activeUserId, logEntry);
     }
   };
 
@@ -587,7 +618,6 @@ const App: React.FC = () => {
     if (isLiveMode) {
       await handleRefreshReplies();
     }
-    // Note: Firestore handles real-time sync automatically via listeners
     setLastSync(new Date().toISOString());
   }, [isLiveMode, drivers]);
 
@@ -601,8 +631,8 @@ const App: React.FC = () => {
     });
 
     // Persist to Supabase
-    if (updatedDriver && user?.uid) {
-      await updateDriverInSupabase(user.uid, id, updates);
+    if (updatedDriver && activeUserId) {
+      await updateDriverInSupabase(activeUserId, id, updates);
     }
   };
 
@@ -616,23 +646,8 @@ const App: React.FC = () => {
     setDrivers(prev => [...prev, newD]);
 
     // Persist to Supabase
-    if (user?.uid) {
-      await addDriverToSupabase(user.uid, newD);
-    }
-  };
-
-  const handleBulkAddDrivers = async (dataList: Omit<Driver, 'id' | 'emailSent'>[]) => {
-    const newDrivers = dataList.map(data => ({
-      ...data,
-      id: Math.random().toString(36).substr(2, 9),
-      emailSent: false
-    }));
-
-    setDrivers(prev => [...prev, ...newDrivers]);
-
-    // Persist to Supabase
-    if (user?.uid) {
-      await bulkAddDrivers(user.uid, newDrivers);
+    if (activeUserId) {
+      await addDriverToSupabase(activeUserId, newD);
     }
   };
 
@@ -640,8 +655,8 @@ const App: React.FC = () => {
     setDrivers(prev => prev.filter(d => d.id !== id));
 
     // Persist deletion to Supabase
-    if (user?.uid) {
-      await deleteDriverFromSupabase(user.uid, id);
+    if (activeUserId) {
+      await deleteDriverFromSupabase(activeUserId, id);
     }
   };
 
@@ -674,22 +689,10 @@ const App: React.FC = () => {
   const toggleTheme = () => setTheme(v => v === 'light' ? 'dark' : 'light');
 
   if (!authUser) return (
-    <Login onLogin={(u, token) => {
+    <Login onLogin={(u) => {
       setAuthUser(u);
-      // Immediately lock the UI board filter to their assignment on login
       if (u.assignedBoard) {
-          setBoardFilter(u.assignedBoard);
-      }
-      
-      if (token) {
-        setUser({
-          email: u.email,
-          name: u.name,
-          picture: u.picture || '',
-          accessToken: token,
-          expiry: Date.now() + 3500 * 1000
-        });
-        setIsLiveMode(true); // ✅ Auto-enable Live Mode
+        setBoardFilter(u.assignedBoard);
       }
     }} />
   );
@@ -755,7 +758,7 @@ const App: React.FC = () => {
           </button>
         </header>
 
-        {activeTab === 'Dashboard' && <Dashboard drivers={filteredDrivers} assignedBoard={authUser?.assignedBoard} firebaseUid={user?.email || authUser?.uid || authUser?.email} />}
+        {activeTab === 'Dashboard' && <Dashboard drivers={filteredDrivers} assignedBoard={authUser?.assignedBoard} />}
 
         {activeTab === 'Connection' && (
           <div className="space-y-8">
@@ -771,7 +774,6 @@ const App: React.FC = () => {
                 setFilters={{ setSearchQuery, setEldFilter, setDutyFilter, setCompanyFilter, setBoardFilter }}
                 onUpdateDriver={handleUpdateDriver}
                 onAddDriver={handleAddDriver}
-                onBulkAddDrivers={handleBulkAddDrivers}
                 onDeleteDriver={handleDeleteDriver}
                 onManualSendEmail={handleManualSendEmail}
                 onResetDriver={handleResetDriver}
@@ -781,8 +783,8 @@ const App: React.FC = () => {
         )}
 
         {activeTab === 'Profile Form' && <ProfileForm drivers={drivers} emailLogs={emailLogs} onSendReminder={handleProfileFormReminder} onUpdatePFDate={handleUpdatePFDate} />}
-        {activeTab === 'AI Assistant' && <AIAssistant />}
-        {activeTab === 'Broadcast' && <EmailBroadcast drivers={filteredDrivers} assignedBoard={authUser?.assignedBoard} firebaseUid={user?.email || authUser?.uid || authUser?.email} userAccessToken={user?.accessToken} />}
+        {activeTab === 'AI Assistant' && <AIAssistant userId={authUser?.uid} />}
+        {activeTab === 'Broadcast' && <EmailBroadcast drivers={filteredDrivers} assignedBoard={authUser?.assignedBoard} userId={activeUserId} userAccessToken={user?.accessToken} />}
         {activeTab === 'History' && (
           <div className="space-y-4">
             {emailLogs.map(log => (
@@ -804,3 +806,7 @@ const App: React.FC = () => {
 };
 
 export default App;
+
+
+
+

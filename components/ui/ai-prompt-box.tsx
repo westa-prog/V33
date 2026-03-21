@@ -495,7 +495,7 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
   const handleDrop = React.useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const files = Array.from(e.dataTransfer.files);
+    const files = Array.from(e.dataTransfer.files as FileList);
     const imageFiles = files.filter((file) => isImageFile(file));
     if (imageFiles.length > 0) processFile(imageFiles[0]);
   }, []);

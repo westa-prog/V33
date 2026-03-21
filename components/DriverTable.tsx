@@ -16,8 +16,7 @@ import {
   Trash2,
   CheckCircle,
   RefreshCcw,
-  Loader2,
-  Upload
+  Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -40,7 +39,6 @@ interface DriverTableProps {
   };
   onUpdateDriver: (id: string, updates: Partial<Driver>) => void;
   onAddDriver: (driver: Omit<Driver, 'id' | 'emailSent' | 'lastEmailTime'>) => void;
-  onBulkAddDrivers: (drivers: Omit<Driver, 'id' | 'emailSent' | 'lastEmailTime'>[]) => void;
   onDeleteDriver: (id: string) => void;
   onManualSendEmail: (id: string) => Promise<{ sentAt: string }>;
   onResetDriver: (id: string) => void;
@@ -53,7 +51,6 @@ export const DriverTable: React.FC<DriverTableProps> = ({
   setFilters,
   onUpdateDriver,
   onAddDriver,
-  onBulkAddDrivers,
   onDeleteDriver,
   onManualSendEmail,
   onResetDriver
@@ -62,54 +59,6 @@ export const DriverTable: React.FC<DriverTableProps> = ({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [currentTime, setCurrentTime] = useState(new Date());
   const [sendingId, setSendingId] = useState<string | null>(null);
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = async (evt) => {
-      try {
-        const bstr = evt.target?.result;
-        if (typeof bstr !== 'string' && !(bstr instanceof ArrayBuffer)) return;
-
-        const xlsx = await import('xlsx');
-        const wb = xlsx.read(bstr, { type: 'binary' });
-        const wsname = wb.SheetNames[0];
-        const ws = wb.Sheets[wsname];
-        const data = xlsx.utils.sheet_to_json<any>(ws);
-
-        if (data.length === 0) {
-          alert("The uploaded Excel file is empty.");
-          return;
-        }
-
-        const newDrivers = data.map(row => ({
-          name: row.Name || row.name || 'Unknown Driver',
-          email: row.Email || row.email || `no-email-${Math.random().toString(36).substr(2, 5)}@example.com`,
-          company: row.Company || row.company || 'Unknown Company',
-          board: row.Board || row.board || 'Board A',
-          deviceType: row.DeviceType || row.deviceType || '',
-          appVersion: row.AppVersion || row.appVersion || '',
-          eldStatus: ELDStatus.CONNECTED,
-          dutyStatus: DutyStatus.NOT_SET,
-          followUp: FollowUpStatus.NONE,
-        }));
-
-        onBulkAddDrivers(newDrivers);
-        alert(`Successfully imported ${newDrivers.length} drivers!`);
-      } catch (err) {
-        console.error("Error importing drivers:", err);
-        alert("Failed to read Excel file. Please ensure it is correctly formatted.");
-      } finally {
-        if (fileInputRef.current) {
-          fileInputRef.current.value = '';
-        }
-      }
-    };
-    reader.readAsBinaryString(file);
-  };
 
   const handleSendFollowUp = async (driverId: string) => {
     setSendingId(driverId);
@@ -284,22 +233,6 @@ export const DriverTable: React.FC<DriverTableProps> = ({
           <UserPlus className="w-4 h-4" />
           Add Driver
         </button>
-
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-bold transition-all shadow-sm active:scale-95"
-          title="Import Drivers from Excel/CSV"
-        >
-          <Upload className="w-4 h-4" />
-          Import
-        </button>
-        <input
-          type="file"
-          accept=".xlsx, .xls, .csv"
-          ref={fileInputRef}
-          className="hidden"
-          onChange={handleFileUpload}
-        />
 
         <div className="h-8 w-px bg-slate-200 dark:bg-slate-700 mx-2 hidden md:block"></div>
 
