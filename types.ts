@@ -77,6 +77,8 @@ export interface AuthUser {
   picture?: string;
   assignedBoard?: string;
   uid?: string;
+  role?: string;
+  assignedCompanies?: string[];
 }
 
 export interface SheetConfig {

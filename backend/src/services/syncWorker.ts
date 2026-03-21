@@ -1,15 +1,13 @@
 import { fetchELDData } from './eldFetcher';
 import { sendReminderEmail, sendDisconnectionEmail } from './emailSender';
-import { getDb } from './firebaseAdmin';
+import { getDb } from './supabaseAdmin';
 import { ELDDriverPayload, ELDStatus, DutyStatus } from '../types';
 
 /**
- * Firebase user IDs that should receive the synced driver data.
- * All accounts listed here will see the same drivers in their dashboard.
+ * Supabase user IDs that should receive the synced driver data.
  */
-const FIREBASE_USER_IDS: string[] = [
-    'glEDT7jKxsXiag5HmZekKuYwQ103',  // info.algoservice01@gmail.com
-    'W9n0OWI6NPOS4J7owBTIull2yv52',   // westa@algogroup.us
+const SUPABASE_USER_IDS: string[] = [
+    // Add UUIDs of the admin users here (e.g., info.algoservice01 uuid)
 ];
 
 /**
@@ -46,16 +44,20 @@ const runSyncForUserIds = async (userIds: string[]) => {
 
         if (db) {
             try {
-                // Read state from first user's record
-                const doc = await db.collection('users').doc(userIds[0]).collection('drivers').doc(driverId).get();
-                if (doc.exists) {
-                    existingData = doc.data() || {};
-                    last3DayEmail = existingData.last3DayEmail || null;
-                    last5DayEmail = existingData.last5DayEmail || null;
-                    lastDisconnectEmail = existingData.lastDisconnectEmail || null;
+                // Read state from first user's record in Supabase
+                const { data } = await db.from('drivers')
+                    .select('*')
+                    .eq('id', driverId)
+                    .eq('user_id', userIds[0])
+                    .single();
+                if (data) {
+                    existingData = data;
+                    last3DayEmail = existingData.last3dayemail || null;
+                    last5DayEmail = existingData.last5dayemail || null;
+                    lastDisconnectEmail = existingData.lastdisconnectemail || null;
                 }
             } catch (e) {
-                console.warn(`[WORKER] Could not read Firestore for driver ${driverId}:`, e);
+                console.warn(`[WORKER] Could not read Supabase for driver ${driverId}:`, e);
             }
         }
 
@@ -106,43 +108,33 @@ const runSyncForUserIds = async (userIds: string[]) => {
             if (sent) { updatedDisconnectEmail = now.toISOString(); emailsSent++; }
         }
 
-        // 6. Write to Firestore at users/{userId}/drivers/{driverId}
-        //    Matches the exact Driver interface the React frontend uses
-        const driverPayload: Record<string, any> = {
-            id: driverId,
-            name: eldDriver.fullName,
-            email: eldDriver.emailAddress,
-            // Use ELD-sourced fields; fallback to existing Firestore data
-            company: eldDriver.company || existingData.company || '',
-            board: eldDriver.board || existingData.board || '',
-            deviceType: eldDriver.deviceType || existingData.deviceType || 'Leader ELD',
-            appVersion: eldDriver.appVersion || existingData.appVersion || '',
-            // Live ELD data
-            eldStatus: eldDriver.isConnected ? ELDStatus.CONNECTED : ELDStatus.DISCONNECTED,
-            dutyStatus: eldDriver.dutyStatus || DutyStatus.NOT_SET,
-            emailSent: existingData.emailSent || false,
-            followUp: existingData.followUp || null,
-            // GPS coordinates for map display
-            gpsLoc: eldDriver.coordinates,
-            // Profile form tracking
-            lastPFUpdate: eldDriver.lastProfileUpdateIso,
-            last3DayEmail: updatedLast3DayEmail,
-            last5DayEmail: updatedLast5DayEmail,
-            lastDisconnectEmail: updatedDisconnectEmail,
-            // Metadata
-            syncedAt: now.toISOString()
-        };
-
+        // 6. Write to Supabase using bulk upsert mapping 
         if (db) {
-            // Write to ALL user collections so every admin sees the same data
-            const writePromises = userIds.map(uid =>
-                db!.collection('users').doc(uid).collection('drivers')
-                    .doc(driverId)
-                    .set(driverPayload, { merge: true })
-                    .catch((e: any) => console.error(`[WORKER] ❌ Write failed for ${eldDriver.fullName} to user ${uid}:`, e))
-            );
-            await Promise.all(writePromises);
-            writtenCount++;
+            const upsertPayloads = userIds.map(uid => ({
+                id: driverId,
+                user_id: uid,
+                name: eldDriver.fullName,
+                email: eldDriver.emailAddress,
+                company: eldDriver.company || existingData.company || '',
+                board: eldDriver.board || existingData.board || '',
+                devicetype: eldDriver.deviceType || existingData.devicetype || 'Leader ELD',
+                appversion: eldDriver.appVersion || existingData.appversion || '',
+                eldstatus: eldDriver.isConnected ? ELDStatus.CONNECTED : ELDStatus.DISCONNECTED,
+                dutystatus: eldDriver.dutyStatus || DutyStatus.NOT_SET,
+                emailsent: existingData.emailsent || false,
+                followup: existingData.followup || null,
+                lastpfupdate: eldDriver.lastProfileUpdateIso,
+                last3dayemail: updatedLast3DayEmail,
+                last5dayemail: updatedLast5DayEmail,
+                updated_at: now.toISOString()
+            }));
+
+            const { error } = await db.from('drivers').upsert(upsertPayloads, { onConflict: 'id,user_id' });
+            if (error) {
+                console.error(`[WORKER] ❌ Write failed for ${eldDriver.fullName}:`, error);
+            } else {
+                writtenCount++;
+            }
         } else {
             console.log(`[SIM] ${eldDriver.fullName} | ${eldDriver.isConnected ? '🟢 Connected' : '🔴 Disconnected'} | ${status} | Days inactive: ${daysInactive}`);
         }
@@ -151,7 +143,7 @@ const runSyncForUserIds = async (userIds: string[]) => {
     console.log('================================');
     console.log(`[WORKER] ✅ Sync complete!`);
     console.log(`[WORKER]    Processed: ${processedCount} drivers`);
-    console.log(`[WORKER]    Firestore writes: ${writtenCount}`);
+    console.log(`[WORKER]    Supabase writes: ${writtenCount}`);
     console.log(`[WORKER]    Emails sent: ${emailsSent}`);
     console.log('================================\n');
 
@@ -162,19 +154,15 @@ const runSyncForUserIds = async (userIds: string[]) => {
  * Run a full ELD sync cycle for ALL configured admin users (used by cron scheduler).
  */
 export const runSyncWorker = async () => {
-    const userIds = process.env.FIREBASE_USER_ID
-        ? [process.env.FIREBASE_USER_ID, ...FIREBASE_USER_IDS.filter(id => id !== process.env.FIREBASE_USER_ID)]
-        : FIREBASE_USER_IDS;
+    const userIds = process.env.SUPABASE_USER_ID
+        ? [process.env.SUPABASE_USER_ID, ...SUPABASE_USER_IDS.filter(id => id !== process.env.SUPABASE_USER_ID)]
+        : SUPABASE_USER_IDS;
+    if (userIds.length === 0) return { processedCount: 0, writtenCount: 0, emailsSent: 0 };
     return runSyncForUserIds(userIds);
 };
 
-/**
- * Run a full ELD sync for a SINGLE user (triggered on-demand from the frontend).
- * This allows a newly logged-in admin to import their drivers immediately without waiting for cron.
- */
-export const runSyncForUser = async (firebaseUserId: string) => {
-    console.log(`[WORKER] On-demand import triggered for user: ${firebaseUserId}`);
-    // Include their UID plus all global admin UIDs so shared driver records stay in sync
-    const userIds = [firebaseUserId, ...FIREBASE_USER_IDS.filter(id => id !== firebaseUserId)];
+export const runSyncForUser = async (supabaseUserId: string) => {
+    console.log(`[WORKER] On-demand import triggered for user: ${supabaseUserId}`);
+    const userIds = [supabaseUserId, ...SUPABASE_USER_IDS.filter(id => id !== supabaseUserId)];
     return runSyncForUserIds(userIds);
 };

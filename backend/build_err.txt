@@ -1,0 +1,32 @@
+
+> eld-backend-monitor@1.0.0 build
+> tsc
+
+src/server.ts(1,21): error TS7016: Could not find a declaration file for module 'express'. 'C:/Users/AA6/Desktop/Asana/V33/node_modules/express/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/express` if it exists or add a new declaration (.d.ts) file containing `declare module 'express';`
+src/server.ts(2,18): error TS7016: Could not find a declaration file for module 'cors'. 'C:/Users/AA6/Desktop/Asana/V33/node_modules/cors/lib/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/cors` if it exists or add a new declaration (.d.ts) file containing `declare module 'cors';`
+src/server.ts(3,20): error TS2307: Cannot find module 'dotenv' or its corresponding type declarations.
+src/server.ts(4,20): error TS2307: Cannot find module 'multer' or its corresponding type declarations.
+src/server.ts(7,23): error TS2307: Cannot find module 'node-cron' or its corresponding type declarations.
+src/server.ts(8,36): error TS2307: Cannot find module 'node-cron' or its corresponding type declarations.
+src/server.ts(71,25): error TS7006: Parameter 'req' implicitly has an 'any' type.
+src/server.ts(71,30): error TS7006: Parameter 'res' implicitly has an 'any' type.
+src/server.ts(81,36): error TS7006: Parameter 'req' implicitly has an 'any' type.
+src/server.ts(81,41): error TS7006: Parameter 'res' implicitly has an 'any' type.
+src/server.ts(92,29): error TS7006: Parameter 'req' implicitly has an 'any' type.
+src/server.ts(92,34): error TS7006: Parameter 'res' implicitly has an 'any' type.
+src/server.ts(105,39): error TS7006: Parameter 'req' implicitly has an 'any' type.
+src/server.ts(105,44): error TS7006: Parameter 'res' implicitly has an 'any' type.
+src/server.ts(169,40): error TS7006: Parameter 'req' implicitly has an 'any' type.
+src/server.ts(169,45): error TS7006: Parameter 'res' implicitly has an 'any' type.
+src/server.ts(203,72): error TS7006: Parameter 'req' implicitly has an 'any' type.
+src/server.ts(203,77): error TS7006: Parameter 'res' implicitly has an 'any' type.
+src/server.ts(206,36): error TS2503: Cannot find namespace 'Express'.
+src/server.ts(246,30): error TS7006: Parameter 'req' implicitly has an 'any' type.
+src/server.ts(246,35): error TS7006: Parameter 'res' implicitly has an 'any' type.
+src/server.ts(251,29): error TS7006: Parameter 'req' implicitly has an 'any' type.
+src/server.ts(251,34): error TS7006: Parameter 'res' implicitly has an 'any' type.
+src/server.ts(256,38): error TS7006: Parameter 'req' implicitly has an 'any' type.
+src/server.ts(256,43): error TS7006: Parameter 'res' implicitly has an 'any' type.
+src/services/emailSender.ts(1,24): error TS2307: Cannot find module 'nodemailer' or its corresponding type declarations.

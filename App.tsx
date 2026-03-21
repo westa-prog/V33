@@ -12,24 +12,25 @@ import { ProfileForm } from './components/ProfileForm';
 import { Dashboard } from './components/Dashboard';
 import { CustomEmail } from './components/CustomEmail';
 import { EmailBroadcast } from './components/EmailBroadcast';
+import { AdminPanel } from './components/AdminPanel';
 import { generateComplianceEmail, generateDriverReply } from './services/geminiService';
 import {
   initializeUserDatabase,
   subscribeToDrivers,
   subscribeToEmailLogs,
   subscribeToDriverReplies,
-  addDriver as addDriverToFirestore,
-  updateDriver as updateDriverInFirestore,
-  deleteDriver as deleteDriverFromFirestore,
+  addDriver as addDriverToSupabase,
+  updateDriver as updateDriverInSupabase,
+  deleteDriver as deleteDriverFromSupabase,
   addEmailLog,
   addDriverReply,
   hasImportedFromSheets,
   markSheetsImported,
   bulkAddDrivers
-} from './services/firestoreService';
+} from './services/supabaseService';
 import { fetchSheetData } from './services/sheetService';
 import { sendGmailMessage, fetchGmailReplies } from './services/gmailService';
-import { MenuBar } from './components/ui/glow-menu';
+import { Sidebar } from './components/Sidebar';
 import { AnimatedText } from './components/ui/animated-text';
 import { HeroBackground } from './components/ui/shape-landing-hero';
 
@@ -56,15 +57,7 @@ import {
   Sun,
   ShieldCheck,
   AlertTriangle,
-  Mail,
-  Wifi,
   RefreshCcw,
-  History,
-  LayoutDashboard,
-  FileText,
-  ChevronDown,
-  ChevronUp,
-  Clock,
   User,
   LogIn,
   LogOut,
@@ -458,9 +451,9 @@ const App: React.FC = () => {
     setDrivers(prev => prev.map(d => d.id === driver.id ? updatedDriver : d));
     setEmailLogs(prev => [logEntry, ...prev]);
 
-    // Persist to Firestore
+    // Persist to Supabase
     if (user?.uid) {
-      await updateDriverInFirestore(user.uid, driver.id, updatedDriver);
+      await updateDriverInSupabase(user.uid, driver.id, updatedDriver);
       await addEmailLog(user.uid, logEntry);
     }
 
@@ -516,7 +509,7 @@ const App: React.FC = () => {
     setEmailLogs(prev => [logEntry, ...prev]);
 
     if (user?.uid) {
-      await updateDriverInFirestore(user.uid, driver.id, updatePayload);
+      await updateDriverInSupabase(user.uid, driver.id, updatePayload);
       await addEmailLog(user.uid, logEntry);
     }
   };
@@ -529,7 +522,7 @@ const App: React.FC = () => {
     setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, ...updatePayload } : d));
 
     if (user?.uid) {
-      await updateDriverInFirestore(user.uid, driverId, updatePayload);
+      await updateDriverInSupabase(user.uid, driverId, updatePayload);
     }
   };
 
@@ -607,9 +600,9 @@ const App: React.FC = () => {
       return newDrivers;
     });
 
-    // Persist to Firestore
+    // Persist to Supabase
     if (updatedDriver && user?.uid) {
-      await updateDriverInFirestore(user.uid, id, updates);
+      await updateDriverInSupabase(user.uid, id, updates);
     }
   };
 
@@ -622,9 +615,9 @@ const App: React.FC = () => {
 
     setDrivers(prev => [...prev, newD]);
 
-    // Persist to Firestore
+    // Persist to Supabase
     if (user?.uid) {
-      await addDriverToFirestore(user.uid, newD);
+      await addDriverToSupabase(user.uid, newD);
     }
   };
 
@@ -637,7 +630,7 @@ const App: React.FC = () => {
 
     setDrivers(prev => [...prev, ...newDrivers]);
 
-    // Persist to Firestore
+    // Persist to Supabase
     if (user?.uid) {
       await bulkAddDrivers(user.uid, newDrivers);
     }
@@ -646,9 +639,9 @@ const App: React.FC = () => {
   const handleDeleteDriver = async (id: string) => {
     setDrivers(prev => prev.filter(d => d.id !== id));
 
-    // Persist deletion to Firestore
+    // Persist deletion to Supabase
     if (user?.uid) {
-      await deleteDriverFromFirestore(user.uid, id);
+      await deleteDriverFromSupabase(user.uid, id);
     }
   };
 
@@ -680,51 +673,6 @@ const App: React.FC = () => {
 
   const toggleTheme = () => setTheme(v => v === 'light' ? 'dark' : 'light');
 
-  const menuItems = [
-    {
-      icon: LayoutDashboard,
-      label: "Dashboard",
-      href: "#",
-      gradient: "radial-gradient(circle, rgba(59,130,246,0.15) 0%, rgba(37,99,235,0.06) 50%, rgba(29,78,216,0) 100%)",
-      iconColor: "text-blue-500",
-    },
-    {
-      icon: Wifi,
-      label: "Connection",
-      href: "#",
-      gradient: "radial-gradient(circle, rgba(34,197,94,0.15) 0%, rgba(22,163,74,0.06) 50%, rgba(21,128,61,0) 100%)",
-      iconColor: "text-green-500",
-    },
-    {
-      icon: FileText,
-      label: "Profile Form",
-      href: "#",
-      gradient: "radial-gradient(circle, rgba(249,115,22,0.15) 0%, rgba(234,88,12,0.06) 50%, rgba(194,65,12,0) 100%)",
-      iconColor: "text-orange-500",
-    },
-    {
-      icon: Sparkles,
-      label: "AI Assistant",
-      href: "#",
-      gradient: "radial-gradient(circle, rgba(168,85,247,0.15) 0%, rgba(147,51,234,0.06) 50%, rgba(126,34,206,0) 100%)",
-      iconColor: "text-purple-500",
-    },
-    {
-      icon: TrendingUp,
-      label: "History",
-      href: "#",
-      gradient: "radial-gradient(circle, rgba(239,68,68,0.15) 0%, rgba(220,38,38,0.06) 50%, rgba(185,28,28,0) 100%)",
-      iconColor: "text-red-500",
-    },
-    {
-      icon: Mail,
-      label: "Broadcast",
-      href: "#",
-      gradient: "radial-gradient(circle, rgba(244,63,94,0.15) 0%, rgba(225,29,72,0.06) 50%, rgba(159,18,57,0) 100%)",
-      iconColor: "text-rose-500",
-    },
-  ];
-
   if (!authUser) return (
     <Login onLogin={(u, token) => {
       setAuthUser(u);
@@ -747,24 +695,26 @@ const App: React.FC = () => {
   );
 
   return (
-    <div className="flex flex-col h-screen bg-slate-50 dark:bg-transparent overflow-hidden transition-colors relative">
+    <div className="flex h-screen bg-slate-50 dark:bg-transparent overflow-hidden transition-colors relative">
       <div className="hidden dark:block absolute inset-0 -z-20 pointer-events-none overflow-hidden">
         <HeroBackground />
       </div>
+
+      {authUser && (
+        <Sidebar 
+          activeTab={activeTab} 
+          setActiveTab={setActiveTab} 
+          isAdmin={authUser.role === 'admin' || authUser.email === 'westa@algogroup.us'} 
+        />
+      )}
       
-      <header className="flex-none flex items-center justify-between px-6 py-4 bg-white dark:bg-slate-900/60 backdrop-blur-md border-b border-slate-200 dark:border-slate-800/60 z-50 shadow-sm relative">
+      <div className="flex-1 flex flex-col h-screen overflow-hidden relative">
+        <header className="flex-none flex items-center justify-between px-6 py-4 bg-white dark:bg-slate-900/60 backdrop-blur-md border-b border-slate-200 dark:border-slate-800/60 z-30 shadow-sm relative">
         <div className="flex items-center gap-6">
           <BrandLogo open={true} onToggle={() => {}} theme={theme} onToggleTheme={toggleTheme} />
         </div>
 
         <div className="flex items-center gap-4">
-          <DatabaseSyncControl
-            isConnected={dbConnected}
-            isSyncing={isSyncing}
-            lastSync={lastSync}
-            isLiveMode={isLiveMode}
-            onToggleLiveMode={setIsLiveMode}
-          />
            {!user ? (
             <button onClick={handleGoogleLogin} className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-50 dark:bg-slate-800 text-indigo-700 dark:text-white rounded-xl font-bold text-xs hover:bg-indigo-100 transition-all shadow-sm active:scale-95">
               <LogIn className="w-4 h-4 text-indigo-600" />
@@ -846,11 +796,9 @@ const App: React.FC = () => {
             ))}
           </div>
         )}
+        {activeTab === 'Admin Panel' && <AdminPanel currentUser={authUser} />}
       </main>
-
-      <div className="absolute bottom-6 left-1/2 min-w-max -translate-x-1/2 z-50">
-          <MenuBar items={menuItems} activeItem={activeTab} onItemClick={setActiveTab} />
-      </div>
+     </div>
     </div>
   );
 };

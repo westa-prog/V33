@@ -16,6 +16,7 @@
     "@react-oauth/google": "^0.13.4",
     "@splinetool/react-spline": "latest",
     "@splinetool/runtime": "^1.12.51",
+    "@supabase/supabase-js": "^2.99.3",
     "axios": "^1.13.6",
     "class-variance-authority": "^0.7.1",
     "clsx": "2.1.1",

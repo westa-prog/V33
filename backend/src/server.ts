@@ -165,11 +165,11 @@ app.post('/api/eld/configure', async (req, res) => {
     }
 });
 
-// Endpoint: Trigger a full ELD import for a specific Firebase user
+// Endpoint: Trigger a full ELD import for a specific user
 app.post('/api/eld/import-now', async (req, res) => {
-    const { firebaseUserId } = req.body;
-    if (!firebaseUserId) {
-        res.status(400).json({ error: 'firebaseUserId is required in the request body' });
+    const { supabaseUserId } = req.body;
+    if (!supabaseUserId) {
+        res.status(400).json({ error: 'supabaseUserId is required in the request body' });
         return;
     }
     
@@ -180,20 +180,82 @@ app.post('/api/eld/import-now', async (req, res) => {
     
     try {
         isSyncing = true;
-        console.log(`[API] Manual import-now triggered for user: ${firebaseUserId}`);
-        const result = await runSyncForUser(firebaseUserId);
+        console.log(`[API] Manual import-now triggered for user: ${supabaseUserId}`);
+        const result = await runSyncForUser(supabaseUserId);
         lastSyncTime = new Date().toISOString();
         res.json({
             message: 'ELD import complete!',
             lastSyncTime,
             driversProcessed: result?.processedCount || 0,
-            firestoreWrites: result?.writtenCount || 0
+            databaseWrites: result?.writtenCount || 0
         });
     } catch (e: any) {
         console.error('[API] ELD import-now failed:', e);
         res.status(500).json({ error: e?.message || 'Import failed' });
     } finally {
         isSyncing = false;
+    }
+});
+// Endpoint: Create a sub-user (Employee) via Admin
+import { getDb } from './services/supabaseAdmin';
+
+app.post('/api/admin/create-user', async (req, res) => {
+    try {
+        const { username, password, admin_id, admin_email, assigned_boards, assigned_companies } = req.body;
+        
+        if (!username || !password || !admin_id || !admin_email) {
+             res.status(400).json({ error: 'Missing required fields' });
+             return;
+        }
+
+        const supabase = getDb();
+        const pseudoEmail = `${username.toLowerCase().replace(/\s+/g, '')}@v33.local`;
+        
+        // 1. Create user in Supabase Auth bypassing standard signup
+        const { data, error } = await supabase.auth.admin.createUser({
+            email: pseudoEmail,
+            password: password,
+            email_confirm: true,
+            user_metadata: { full_name: username }
+        });
+        
+        if (error) throw error;
+        
+        const newUserId = data.user.id;
+        
+        // 2. Update the auto-created profile (via trigger) with the new bindings
+        const { error: updateError } = await supabase.from('profiles').update({
+            admin_id: admin_id,
+            role: 'employee',
+            assigned_boards: assigned_boards || [],
+            assigned_companies: assigned_companies || []
+        }).eq('id', newUserId);
+        
+        if (updateError) {
+             console.error('[API] Failed to update profile assignments:', updateError);
+        }
+        
+        // 3. Email the credentials to the admin
+        const subject = `New Employee Account: ${username}`;
+        const message = `
+            <div style="font-family: sans-serif; padding: 20px;">
+                <h2>New Employee Credentials Generated</h2>
+                <p>You have successfully created an account for <strong>${username}</strong>.</p>
+                <div style="background: #f1f5f9; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                    <p><strong>Login Email:</strong> ${pseudoEmail}</p>
+                    <p><strong>Password:</strong> ${password}</p>
+                </div>
+                <p>They can use this email and password to log in. They will only see drivers for their assigned boards/companies.</p>
+            </div>
+        `;
+        
+        // Delay to avoid blocking the response
+        sendCustomBroadcastEmail([admin_email], subject, message, []).catch(e => console.error('[EMAIL] Failed to send credentials to admin', e));
+        
+        res.json({ success: true, user: data.user, loginEmail: pseudoEmail });
+    } catch (e: any) {
+         console.error('[API] Admin create-user failed:', e);
+         res.status(500).json({ error: e.message });
     }
 });
 
