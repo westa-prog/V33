@@ -13,7 +13,9 @@ interface DashboardProps {
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, firebaseUid }) => {
-    const apiBaseUrl = (import.meta as any).env.VITE_API_URL || 'http://localhost:5000';
+    const rawApiBaseUrl = ((import.meta as any).env.VITE_API_URL || '').trim();
+    const apiBaseUrl = rawApiBaseUrl.replace(/\/+$/, '');
+    const apiUrl = (path: string) => apiBaseUrl ? `${apiBaseUrl}${path}` : path;
     const [boardFilter, setBoardFilter] = useState<string | 'ALL'>('ALL');
     const [previewMode, setPreviewMode] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
     const [backendStatus, setBackendStatus] = useState<{ status: string; cronActive: boolean; lastSyncTime: string | null; isSyncing: boolean } | null>(null);
@@ -66,7 +68,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, fi
     useEffect(() => {
         const checkBackend = async () => {
             try {
-                const res = await axios.get(`${apiBaseUrl}/api/status`);
+                const res = await axios.get(apiUrl('/api/status'));
                 setBackendStatus(res.data);
             } catch (e) {
                 setBackendStatus({ status: 'offline', cronActive: false, lastSyncTime: null, isSyncing: false });
@@ -74,7 +76,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, fi
         };
         const checkEldStatus = async () => {
             try {
-                const res = await axios.get(`${apiBaseUrl}/api/eld/status`);
+                const res = await axios.get(apiUrl('/api/eld/status'));
                 setEldStatus(res.data);
             } catch { /* Backend offline, ELD status unknown */ }
         };
@@ -91,7 +93,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, fi
         try {
             setIsImporting(true);
             setImportResult(null);
-            const res = await axios.post(`${apiBaseUrl}/api/eld/import-now`, {
+            const res = await axios.post(apiUrl('/api/eld/import-now'), {
                 firebaseUserId: firebaseUid,
                 supabaseUserId: firebaseUid
             });
@@ -116,10 +118,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, fi
             const payload = eldLoginMode === 'token'
                 ? { apiKey: eldToken.trim() }
                 : { username: eldUsername.trim(), password: eldPassword };
-            const res = await axios.post(`${apiBaseUrl}/api/eld/configure`, payload);
+            const res = await axios.post(apiUrl('/api/eld/configure'), payload);
             setEldConnectResult({ success: true, message: res.data.message, tenantId: res.data.tenantId });
             // Refresh ELD status to reflect verified = true
-            const statusRes = await axios.get(`${apiBaseUrl}/api/eld/status`);
+            const statusRes = await axios.get(apiUrl('/api/eld/status'));
             setEldStatus(statusRes.data);
         } catch (e: any) {
             setEldConnectResult({ success: false, message: e?.response?.data?.error || 'Connection failed' });
@@ -132,7 +134,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, fi
         if (!backendStatus || backendStatus.status === 'offline') return alert('Backend is offline.');
         try {
             const endpoint = backendStatus.cronActive ? '/api/sync/stop' : '/api/sync/start';
-            await axios.post(`${apiBaseUrl}${endpoint}`);
+            await axios.post(apiUrl(endpoint));
             setBackendStatus(prev => prev ? { ...prev, cronActive: !prev.cronActive } : prev);
         } catch (e) {
             alert('Failed to toggle automation');
@@ -143,7 +145,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, fi
         if (!backendStatus || backendStatus.status === 'offline') return alert('Backend is offline.');
         try {
             setBackendStatus(prev => prev ? { ...prev, isSyncing: true } : prev);
-            await axios.post(`${apiBaseUrl}/api/sync/trigger`);
+            await axios.post(apiUrl('/api/sync/trigger'));
         } catch (e) {
             alert('Manual sync failed');
         }

@@ -11,6 +11,9 @@ interface EmailBroadcastProps {
 }
 
 export const EmailBroadcast: React.FC<EmailBroadcastProps> = ({ drivers, assignedBoard, firebaseUid, userAccessToken }) => {
+    const rawApiBaseUrl = ((import.meta as any).env.VITE_API_URL || '').trim();
+    const apiBaseUrl = rawApiBaseUrl.replace(/\/+$/, '');
+    const apiUrl = (path: string) => apiBaseUrl ? `${apiBaseUrl}${path}` : path;
     const [subject, setSubject] = useState('');
     const [message, setMessage] = useState('');
     const [files, setFiles] = useState<File[]>([]);
@@ -100,8 +103,7 @@ export const EmailBroadcast: React.FC<EmailBroadcastProps> = ({ drivers, assigne
                     formData.append('attachments', file);
                 });
 
-                const baseUrl = (import.meta as any).env.VITE_API_URL || 'http://localhost:5000';
-                const res = await fetch(`${baseUrl}/api/eld/broadcast`, {
+                const res = await fetch(apiUrl('/api/eld/broadcast'), {
                     method: 'POST',
                     body: formData
                 });

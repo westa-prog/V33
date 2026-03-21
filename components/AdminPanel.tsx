@@ -7,6 +7,8 @@ interface AdminPanelProps {
 }
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
+  const rawApiBaseUrl = ((import.meta as any).env.VITE_API_URL || '').trim();
+  const apiBaseUrl = rawApiBaseUrl.replace(/\/+$/, '');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   
@@ -31,21 +33,40 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
     const assigned_companies = companiesInput.split(',').map(s => s.trim()).filter(Boolean);
 
     try {
-      const res = await fetch('/api/admin-create-user', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username,
-          password,
-          admin_id: currentUser.uid,
-          admin_email: currentUser.email,
-          assigned_boards,
-          assigned_companies
-        })
+      const payload = JSON.stringify({
+        username,
+        password,
+        admin_id: currentUser.uid,
+        admin_email: currentUser.email,
+        assigned_boards,
+        assigned_companies
       });
-      
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to create user');
+
+      const endpoints = [
+        apiBaseUrl ? `${apiBaseUrl}/api/admin/create-user` : '',
+        apiBaseUrl ? `${apiBaseUrl}/api/admin-create-user` : '',
+        '/api/admin-create-user'
+      ].filter(Boolean);
+
+      let data: any = null;
+      let lastError = 'Failed to create user';
+
+      for (const url of endpoints) {
+        try {
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: payload
+          });
+          data = await res.json();
+          if (res.ok) break;
+          lastError = data?.error || `Request failed (${res.status})`;
+        } catch (err: any) {
+          lastError = err?.message || 'Network request failed';
+        }
+      }
+
+      if (!data?.success) throw new Error(lastError);
       
       setMessage({ type: 'success', text: `Successfully created ${username}. Credentials emailed to ${currentUser.email}.` });
       setUsername('');
