@@ -13,17 +13,13 @@ const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
 
 const root = ReactDOM.createRoot(rootElement);
 
-// If no Google Client ID is configured, render without GoogleOAuthProvider
-// to avoid "Missing required parameter client_id" error
-const AppTree = clientId ? (
+// Always provide context so OAuth hooks never run outside GoogleOAuthProvider.
+// If clientId is missing, keep app stable and gate the login action in UI.
+const AppTree = (
   <React.StrictMode>
-    <GoogleOAuthProvider clientId={clientId}>
+    <GoogleOAuthProvider clientId={clientId || 'missing-google-client-id'}>
       <App />
     </GoogleOAuthProvider>
-  </React.StrictMode>
-) : (
-  <React.StrictMode>
-    <App />
   </React.StrictMode>
 );
 

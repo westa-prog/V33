@@ -179,6 +179,7 @@ const App: React.FC = () => {
   const [lastSync, setLastSync] = useState<string | undefined>();
   const [dbConnected, setDbConnected] = useState(false);
   const activeUserId = authUser?.uid;
+  const googleClientId = ((window as any).__GOOGLE_CLIENT_ID__ || '').trim();
 
   // Persist theme
   useEffect(() => {
@@ -716,9 +717,14 @@ const App: React.FC = () => {
 
         <div className="flex items-center gap-4">
            {!user ? (
-            <button onClick={handleGoogleLogin} className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-50 dark:bg-slate-800 text-indigo-700 dark:text-white rounded-xl font-bold text-xs hover:bg-indigo-100 transition-all shadow-sm active:scale-95">
+            <button
+              onClick={handleGoogleLogin}
+              disabled={!googleClientId}
+              title={!googleClientId ? 'Set VITE_GOOGLE_CLIENT_ID to enable Google login' : 'Connect Google'}
+              className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-50 dark:bg-slate-800 text-indigo-700 dark:text-white rounded-xl font-bold text-xs hover:bg-indigo-100 transition-all shadow-sm active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
               <LogIn className="w-4 h-4 text-indigo-600" />
-              Connect Google
+              {googleClientId ? 'Connect Google' : 'Google ID Missing'}
             </button>
           ) : (
             <div className="flex items-center gap-4">
