@@ -14,7 +14,11 @@ interface DashboardProps {
 export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard }) => {
     const rawApiBaseUrl = ((import.meta as any).env.VITE_API_URL || '').trim();
     const apiBaseUrl = rawApiBaseUrl.replace(/\/+$/, '');
-    const apiUrl = (path: string) => apiBaseUrl ? `${apiBaseUrl}${path}` : path;
+    const isBrowser = typeof window !== 'undefined';
+    const isLocalHost = isBrowser && ['localhost', '127.0.0.1'].includes(window.location.hostname);
+    const hasLocalApiOverride = /localhost|127\.0\.0\.1/i.test(apiBaseUrl);
+    const effectiveApiBaseUrl = !isLocalHost && hasLocalApiOverride ? '' : apiBaseUrl;
+    const apiUrl = (path: string) => effectiveApiBaseUrl ? `${effectiveApiBaseUrl}${path}` : path;
 
     const [boardFilter, setBoardFilter] = useState<string | 'ALL'>('ALL');
     const [previewMode, setPreviewMode] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
@@ -23,6 +27,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard }) 
         emailConfigured: boolean;
         uploadsEnabled: boolean;
     } | null>(null);
+    const [statusLoading, setStatusLoading] = useState(false);
 
     const boards = Array.from(new Set(drivers.map(d => d.board).filter(Boolean)));
 
@@ -53,20 +58,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard }) 
         return Object.entries(counts).map(([name, Total]) => ({ name, Total }));
     }, [filteredDrivers]);
 
+    const checkBackend = async () => {
+        setStatusLoading(true);
+        try {
+            const res = await axios.get(apiUrl('/api/status'));
+            setBackendStatus(res.data);
+        } catch {
+            setBackendStatus({ status: 'offline', emailConfigured: false, uploadsEnabled: false });
+        } finally {
+            setStatusLoading(false);
+        }
+    };
+
     useEffect(() => {
-        const checkBackend = async () => {
+        const runCheck = async () => {
             try {
-                const res = await axios.get(apiUrl('/api/status'));
-                setBackendStatus(res.data);
+                await checkBackend();
             } catch {
-                setBackendStatus({ status: 'offline', emailConfigured: false, uploadsEnabled: false });
+                // handled in checkBackend
             }
         };
 
-        checkBackend();
-        const interval = setInterval(checkBackend, 15000);
+        runCheck();
+        const interval = setInterval(runCheck, 15000);
         return () => clearInterval(interval);
-    }, [apiBaseUrl]);
+    }, [effectiveApiBaseUrl]);
 
     const COLORS = ['#60a5fa', '#34d399', '#fbbf24', '#f87171', '#a78bfa'];
 
@@ -219,10 +235,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard }) 
                             </p>
                         </div>
                         <button
-                            onClick={() => setBackendStatus(null)}
+                            onClick={checkBackend}
                             className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2 text-sm font-bold"
                         >
-                            <RefreshCw className="w-4 h-4" />
+                            <RefreshCw className={`w-4 h-4 ${statusLoading ? 'animate-spin' : ''}`} />
                             Refresh Card
                         </button>
                     </div>
@@ -233,8 +249,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard }) 
                                 <Server className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
                                 <span className="text-sm font-bold text-slate-700 dark:text-slate-200">API Service</span>
                             </div>
-                            <p className={`text-2xl font-black ${backendStatus?.status === 'online' ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500'}`}>
-                                {backendStatus?.status === 'online' ? 'ONLINE' : 'OFFLINE'}
+                            <p className={`text-2xl font-black ${backendStatus?.status === 'online' ? 'text-emerald-600 dark:text-emerald-400' : statusLoading ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500'}`}>
+                                {statusLoading ? 'CHECKING' : backendStatus?.status === 'online' ? 'ONLINE' : 'OFFLINE'}
                             </p>
                             <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">Used by the admin panel and broadcast tools.</p>
                         </div>
