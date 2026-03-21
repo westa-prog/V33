@@ -13,6 +13,7 @@ interface DashboardProps {
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, firebaseUid }) => {
+    const apiBaseUrl = (import.meta as any).env.VITE_API_URL || 'http://localhost:5000';
     const [boardFilter, setBoardFilter] = useState<string | 'ALL'>('ALL');
     const [previewMode, setPreviewMode] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
     const [backendStatus, setBackendStatus] = useState<{ status: string; cronActive: boolean; lastSyncTime: string | null; isSyncing: boolean } | null>(null);
@@ -65,7 +66,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, fi
     useEffect(() => {
         const checkBackend = async () => {
             try {
-                const res = await axios.get('http://localhost:5000/api/status');
+                const res = await axios.get(`${apiBaseUrl}/api/status`);
                 setBackendStatus(res.data);
             } catch (e) {
                 setBackendStatus({ status: 'offline', cronActive: false, lastSyncTime: null, isSyncing: false });
@@ -73,7 +74,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, fi
         };
         const checkEldStatus = async () => {
             try {
-                const res = await axios.get('http://localhost:5000/api/eld/status');
+                const res = await axios.get(`${apiBaseUrl}/api/eld/status`);
                 setEldStatus(res.data);
             } catch { /* Backend offline, ELD status unknown */ }
         };
@@ -81,7 +82,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, fi
         checkEldStatus();
         const interval = setInterval(checkBackend, 10000);
         return () => clearInterval(interval);
-    }, []);
+    }, [apiBaseUrl]);
 
     const importFromELD = async () => {
         if (!firebaseUid) return alert('You must be logged in to import ELD data.');
@@ -90,8 +91,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, fi
         try {
             setIsImporting(true);
             setImportResult(null);
-            const res = await axios.post('http://localhost:5000/api/eld/import-now', { firebaseUserId: firebaseUid });
-            setImportResult({ driversProcessed: res.data.driversProcessed, firestoreWrites: res.data.firestoreWrites });
+            const res = await axios.post(`${apiBaseUrl}/api/eld/import-now`, {
+                firebaseUserId: firebaseUid,
+                supabaseUserId: firebaseUid
+            });
+            setImportResult({
+                driversProcessed: res.data.driversProcessed || 0,
+                firestoreWrites: res.data.firestoreWrites || res.data.databaseWrites || 0
+            });
         } catch (e: any) {
             alert(`Import failed: ${e?.response?.data?.error || e.message}`);
         } finally {
@@ -109,10 +116,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, fi
             const payload = eldLoginMode === 'token'
                 ? { apiKey: eldToken.trim() }
                 : { username: eldUsername.trim(), password: eldPassword };
-            const res = await axios.post('http://localhost:5000/api/eld/configure', payload);
+            const res = await axios.post(`${apiBaseUrl}/api/eld/configure`, payload);
             setEldConnectResult({ success: true, message: res.data.message, tenantId: res.data.tenantId });
             // Refresh ELD status to reflect verified = true
-            const statusRes = await axios.get('http://localhost:5000/api/eld/status');
+            const statusRes = await axios.get(`${apiBaseUrl}/api/eld/status`);
             setEldStatus(statusRes.data);
         } catch (e: any) {
             setEldConnectResult({ success: false, message: e?.response?.data?.error || 'Connection failed' });
@@ -125,7 +132,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, fi
         if (!backendStatus || backendStatus.status === 'offline') return alert('Backend is offline.');
         try {
             const endpoint = backendStatus.cronActive ? '/api/sync/stop' : '/api/sync/start';
-            await axios.post(`http://localhost:5000${endpoint}`);
+            await axios.post(`${apiBaseUrl}${endpoint}`);
             setBackendStatus(prev => prev ? { ...prev, cronActive: !prev.cronActive } : prev);
         } catch (e) {
             alert('Failed to toggle automation');
@@ -136,7 +143,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, fi
         if (!backendStatus || backendStatus.status === 'offline') return alert('Backend is offline.');
         try {
             setBackendStatus(prev => prev ? { ...prev, isSyncing: true } : prev);
-            await axios.post('http://localhost:5000/api/sync/trigger');
+            await axios.post(`${apiBaseUrl}/api/sync/trigger`);
         } catch (e) {
             alert('Manual sync failed');
         }
@@ -211,8 +218,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, fi
                     {/* Pie Chart */}
                     <div className="bg-white/90 dark:bg-slate-900/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col min-h-[350px]">
                         <h3 className="text-sm font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-6">Connection Status Overview</h3>
-                        <div className="flex-1 relative">
-                            <ResponsiveContainer width="100%" height="100%">
+                        <div className="relative h-[260px] md:h-[290px] min-w-0">
+                            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={200}>
                                 <PieChart>
                                     <Pie
                                         data={connectionStats}
@@ -261,8 +268,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, fi
                     {/* Bar Chart */}
                     <div className="bg-white/90 dark:bg-slate-900/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 flex-1 min-h-[300px] flex flex-col">
                         <h3 className="text-sm font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-6">Duty Status Distribution</h3>
-                        <div className="flex-1 relative">
-                            <ResponsiveContainer width="100%" height="100%">
+                        <div className="relative h-[240px] md:h-[280px] min-w-0">
+                            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={200}>
                                 <BarChart data={dutyStats} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" opacity={0.2} />
                                     <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 'bold' }} dy={10} />
