@@ -34,3 +34,5 @@ backend/dist
 backend/node_modules
 backend/uploads
 backend/*.txt
+
+.vercel
