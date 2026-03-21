@@ -823,6 +823,24 @@ const App: React.FC = () => {
         {activeTab === 'Profile Form' && <ProfileForm drivers={drivers} emailLogs={emailLogs} onSendReminder={handleProfileFormReminder} onUpdatePFDate={handleUpdatePFDate} />}
         {activeTab === 'AI Assistant' && <AIAssistant userId={authUser?.uid} />}
         {activeTab === 'Broadcast' && <EmailBroadcast drivers={filteredDrivers} assignedBoard={authUser?.assignedBoard} userId={activeUserId} userAccessToken={user?.accessToken} />}
+        {activeTab === 'Activity' && isAdminUser && (
+          <div className="space-y-4">
+            {emailLogs
+              .filter(log => log.type === 'activity' || log.sentVia === 'System')
+              .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+              .map(log => (
+                <div key={log.id} className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
+                  <p className="text-sm font-semibold text-slate-900 dark:text-white">{log.content}</p>
+                  <p className="text-xs text-slate-500 mt-2">{new Date(log.timestamp).toLocaleString()}</p>
+                </div>
+              ))}
+            {emailLogs.filter(log => log.type === 'activity' || log.sentVia === 'System').length === 0 && (
+              <div className="p-6 text-sm text-slate-500 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
+                No activity yet.
+              </div>
+            )}
+          </div>
+        )}
         {activeTab === 'History' && (
           <div className="space-y-4">
             {emailLogs.map(log => (
