@@ -88,6 +88,11 @@ Set all of these in Render before first deploy:
 - `SMTP_PASS`
 - `SMTP_FROM`
 
+Important key note:
+
+- `SUPABASE_SERVICE_ROLE_KEY` must be the project service role key (or secret server key) from Supabase Project Settings.
+- Do not use a Supabase personal access token (`sbp_...`) for `SUPABASE_SERVICE_ROLE_KEY`; backend admin APIs will return `Invalid API key`.
+
 ## 5) Deploy
 
 Render uses:
@@ -108,6 +113,12 @@ Quick deployed API check:
 ```bash
 curl https://<your-render-service>.onrender.com/api/status
 ```
+
+If `POST /api/broadcast` fails:
+
+- Confirm Gmail uses an App Password (not your normal account password).
+- Confirm SMTP host/port are correct (`smtp.gmail.com`, `587`).
+- Check Render logs for SMTP auth or network errors.
 
 ## 5.1) Remote-Only Testing (No Localhost)
 
