@@ -263,7 +263,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard }) 
                             <p className={`text-2xl font-black ${backendStatus?.emailConfigured ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
                                 {backendStatus?.emailConfigured ? 'READY' : 'SIMULATION'}
                             </p>
-                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">SMTP missing means broadcasts run in safe simulation mode.</p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+                                {backendStatus?.emailConfigured
+                                    ? 'SMTP configured. Broadcasts are sent in live mode.'
+                                    : 'SMTP missing means broadcasts run in safe simulation mode.'}
+                            </p>
                         </div>
 
                         <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 p-5">
