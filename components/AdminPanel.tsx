@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { UserPlus, Shield, X, Check, Loader2 } from 'lucide-react';
-import { AuthUser } from '../../types';
+import { AuthUser } from '../types';
 
 interface AdminPanelProps {
   currentUser: AuthUser;
@@ -31,7 +31,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
     const assigned_companies = companiesInput.split(',').map(s => s.trim()).filter(Boolean);
 
     try {
-      const res = await fetch('http://localhost:5000/api/admin/create-user', {
+      const res = await fetch('/api/admin-create-user', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
