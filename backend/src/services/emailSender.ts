@@ -1,30 +1,41 @@
 import nodemailer from 'nodemailer';
 
-// Nodemailer SMTP transport — uses Gmail App Password or any SMTP provider.
-// If SMTP_HOST is not set, runs in simulation mode (emails printed to console only).
+type Attachment = { filename: string; path: string; cid?: string };
+
 const mockTransporter = {
     sendMail: async (mailOptions: any) => {
-        console.log(`📧 [EMAIL SIM] TO: ${mailOptions.to} | SUBJECT: ${mailOptions.subject}`);
-        await new Promise(r => setTimeout(r, 200));
+        const to = mailOptions.to || mailOptions.bcc || '(no-recipient)';
+        console.log(`[EMAIL SIM] TO: ${to} | SUBJECT: ${mailOptions.subject}`);
+        await new Promise((resolve) => setTimeout(resolve, 200));
         return { messageId: 'simulated_send' };
     }
 };
 
 let transporter: any = mockTransporter;
 
-if (process.env.SMTP_HOST && process.env.SMTP_USER) {
+const smtpHost = process.env.SMTP_HOST;
+const smtpUser = process.env.SMTP_USER;
+const smtpPass = process.env.SMTP_PASS;
+const smtpPort = Number(process.env.SMTP_PORT) || 587;
+const smtpSecure = smtpPort === 465;
+
+if (smtpHost && smtpUser && smtpPass) {
     transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST,
-        port: Number(process.env.SMTP_PORT) || 587,
-        secure: false,
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpSecure,
+        requireTLS: !smtpSecure,
         auth: {
-            user: process.env.SMTP_USER,
-            pass: process.env.SMTP_PASS
-        }
+            user: smtpUser,
+            pass: smtpPass
+        },
+        connectionTimeout: 15000,
+        greetingTimeout: 10000,
+        socketTimeout: 20000
     });
-    console.log('[EMAIL] ✅ Nodemailer SMTP initialized.');
+    console.log(`[EMAIL] SMTP initialized for host=${smtpHost}:${smtpPort}`);
 } else {
-    console.log('[EMAIL] ℹ️  No SMTP config found. Running in simulation mode.');
+    console.log('[EMAIL] No complete SMTP config found. Running in simulation mode.');
 }
 
 const FROM = process.env.SMTP_FROM || '"Leader A1 Fleet System" <noreply@leadera1.com>';
@@ -34,7 +45,7 @@ export const sendReminderEmail = async (to: string, driverName: string, days: nu
         const mailOptions = {
             from: FROM,
             to,
-            subject: `⚠️ Action Required: ELD Profile Form ${days}+ Days Overdue`,
+            subject: `Action Required: ELD Profile Form ${days}+ Days Overdue`,
             html: `
                 <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px;">
                     <h2 style="color: #e11d48;">Profile Form Update Required</h2>
@@ -47,10 +58,10 @@ export const sendReminderEmail = async (to: string, driverName: string, days: nu
             `
         };
         const info = await transporter.sendMail(mailOptions);
-        console.log(`[EMAIL] ✅ ${days}-day reminder sent to ${to} (ID: ${info.messageId})`);
+        console.log(`[EMAIL] ${days}-day reminder sent to ${to} (ID: ${info.messageId})`);
         return true;
     } catch (e) {
-        console.error(`[EMAIL] ❌ Failed to send to ${to}:`, e);
+        console.error(`[EMAIL] Failed to send to ${to}:`, e);
         return false;
     }
 };
@@ -60,7 +71,7 @@ export const sendDisconnectionEmail = async (to: string, driverName: string): Pr
         const mailOptions = {
             from: FROM,
             to,
-            subject: `🔴 ELD Disconnection Alert: ${driverName}`,
+            subject: `ELD Disconnection Alert: ${driverName}`,
             html: `
                 <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px;">
                     <h2 style="color: #dc2626;">ELD Device Disconnected</h2>
@@ -73,35 +84,35 @@ export const sendDisconnectionEmail = async (to: string, driverName: string): Pr
             `
         };
         const info = await transporter.sendMail(mailOptions);
-        console.log(`[EMAIL] ✅ Disconnection alert sent to ${to} (ID: ${info.messageId})`);
+        console.log(`[EMAIL] Disconnection alert sent to ${to} (ID: ${info.messageId})`);
         return true;
     } catch (e) {
-        console.error(`[EMAIL] ❌ Failed to send disconnection alert to ${to}:`, e);
+        console.error(`[EMAIL] Failed to send disconnection alert to ${to}:`, e);
         return false;
     }
 };
 
 export const sendCustomBroadcastEmail = async (
-    to: string[], 
-    subject: string, 
-    htmlContent: string, 
-    attachments: { filename: string; path: string; cid?: string }[] = []
+    to: string[],
+    subject: string,
+    htmlContent: string,
+    attachments: Attachment[] = []
 ): Promise<boolean> => {
     if (to.length === 0) return false;
-    
+
     try {
         const mailOptions = {
             from: FROM,
-            bcc: to, // Use BCC to hide recipients from each other
+            bcc: to,
             subject,
             html: htmlContent,
             attachments
         };
         const info = await transporter.sendMail(mailOptions);
-        console.log(`[EMAIL] ✅ Broadcast sent to ${to.length} recipients (ID: ${info.messageId})`);
+        console.log(`[EMAIL] Broadcast sent to ${to.length} recipients (ID: ${info.messageId})`);
         return true;
     } catch (e) {
-        console.error(`[EMAIL] ❌ Failed to send broadcast:`, e);
+        console.error('[EMAIL] Failed to send broadcast:', e);
         return false;
     }
 };
