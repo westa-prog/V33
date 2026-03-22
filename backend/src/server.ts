@@ -129,6 +129,47 @@ app.get('/api/status', (req, res) => {
     });
 });
 
+app.post('/api/auth/ensure-profile', async (req, res) => {
+    try {
+        const userId = String(req.body?.user_id || '').trim();
+        if (!isUuid(userId)) {
+            res.status(400).json({ error: 'A valid user_id is required.' });
+            return;
+        }
+
+        const supabase = getDb();
+        const { data: userData, error: userError } = await supabase.auth.admin.getUserById(userId);
+        if (userError || !userData?.user) {
+            res.status(404).json({ error: 'User not found.' });
+            return;
+        }
+
+        const email = String(userData.user.email || '').toLowerCase();
+        const fullName = String(userData.user.user_metadata?.full_name || email.split('@')[0] || 'User');
+        const isAdmin = email === ADMIN_EMAIL;
+        const role = isAdmin ? 'admin' : (String(userData.user.user_metadata?.role || 'employee'));
+
+        const { error: upsertError } = await supabase
+            .from('profiles')
+            .upsert({
+                id: userId,
+                email,
+                name: fullName,
+                role
+            }, { onConflict: 'id' });
+
+        if (upsertError && !isProfileSchemaMismatch(String(upsertError.message || ''))) {
+            res.status(500).json({ error: upsertError.message });
+            return;
+        }
+
+        res.json({ success: true, role });
+    } catch (e: any) {
+        console.error('[API] Ensure profile failed:', e);
+        res.status(500).json({ error: e.message || 'Failed to ensure profile.' });
+    }
+});
+
 app.post('/api/admin/create-user', async (req, res) => {
     try {
         const { username, password, admin_id, admin_email, assigned_boards, assigned_companies } = req.body;

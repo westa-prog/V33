@@ -17,6 +17,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { generateComplianceEmail, generateDriverReply } from './services/geminiService';
 import {
   initializeUserDatabase,
+  fetchDrivers,
   fetchUserProfile,
   subscribeToDrivers,
   subscribeToCompanies,
@@ -379,6 +380,17 @@ const App: React.FC = () => {
         const activeEmail = user?.email || authUser?.email || '';
         const activeName = user?.name || authUser?.name || '';
         await initializeUserDatabase(activeUserId, activeEmail, activeName);
+        if (isAdminUser) {
+          try {
+            await fetch(apiUrl('/api/auth/ensure-profile'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ user_id: activeUserId })
+            });
+          } catch (err) {
+            console.warn('Failed to ensure admin profile role:', err);
+          }
+        }
         const profile = await fetchUserProfile(activeUserId);
 
         if (profile) {
@@ -401,6 +413,8 @@ const App: React.FC = () => {
         }
 
         setDbConnected(true);
+        const refreshed = await fetchDrivers(driverOwnerUserId || activeUserId);
+        setDrivers(refreshed);
         console.log('Database connected for user:', activeEmail);
       } catch (err) {
         console.error('Database initialization error:', err);
