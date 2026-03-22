@@ -40,6 +40,7 @@ interface DriverTableProps {
   };
   onUpdateDriver: (id: string, updates: Partial<Driver>) => void;
   onAddDriver: (driver: Omit<Driver, 'id' | 'emailSent' | 'lastEmailTime'>) => void;
+  onAddCompany: (payload: { name: string; board?: string }) => Promise<void> | void;
   onDeleteDriver: (id: string) => void;
   onManualSendEmail: (id: string) => Promise<{ sentAt: string }>;
   onResetDriver: (id: string) => void;
@@ -55,6 +56,7 @@ export const DriverTable: React.FC<DriverTableProps> = ({
   setFilters,
   onUpdateDriver,
   onAddDriver,
+  onAddCompany,
   onDeleteDriver,
   onManualSendEmail,
   onResetDriver,
@@ -62,6 +64,7 @@ export const DriverTable: React.FC<DriverTableProps> = ({
   fixedBoard
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isCompanyModalOpen, setIsCompanyModalOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [currentTime, setCurrentTime] = useState(new Date());
   const [sendingId, setSendingId] = useState<string | null>(null);
@@ -130,6 +133,10 @@ export const DriverTable: React.FC<DriverTableProps> = ({
     eldStatus: ELDStatus.CONNECTED,
     dutyStatus: DutyStatus.NOT_SET,
     followUp: FollowUpStatus.NONE
+  });
+  const [newCompany, setNewCompany] = useState({
+    name: '',
+    board: fixedBoard || 'Board A'
   });
 
   const companyNames = useMemo(() => {
@@ -227,19 +234,45 @@ export const DriverTable: React.FC<DriverTableProps> = ({
     });
   };
 
+  const handleAddCompanySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCompany.name.trim()) return;
+    await onAddCompany({
+      name: newCompany.name.trim(),
+      board: fixedBoard || newCompany.board
+    });
+    setIsCompanyModalOpen(false);
+    setNewCompany({ name: '', board: fixedBoard || 'Board A' });
+  };
+
   const hasActiveFilters = filters.searchQuery !== '' || filters.eldFilter !== 'ALL' || filters.dutyFilter !== 'ALL' || filters.companyFilter !== 'ALL' || filters.boardFilter !== 'ALL';
+  const companyStats = useMemo(() => {
+    return companyNames.map((name) => ({
+      name,
+      count: drivers.filter((d) => d.company === name).length
+    }));
+  }, [companyNames, drivers]);
 
   return (
     <div className="space-y-4 relative">
       {/* Action & Filtering Bar */}
       <div className="flex flex-wrap items-center gap-4 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-800 transition-colors">
-        <button
-          onClick={() => setIsModalOpen(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 transition-all shadow-sm active:scale-95"
-        >
-          <UserPlus className="w-4 h-4" />
-          Add Driver
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIsCompanyModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-slate-700 text-white rounded-lg text-sm font-bold hover:bg-slate-800 transition-all shadow-sm active:scale-95"
+          >
+            <Save className="w-4 h-4" />
+            Add Company
+          </button>
+          <button
+            onClick={() => setIsModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 transition-all shadow-sm active:scale-95"
+          >
+            <UserPlus className="w-4 h-4" />
+            Add Driver
+          </button>
+        </div>
 
         <div className="h-8 w-px bg-slate-200 dark:bg-slate-700 mx-2 hidden md:block"></div>
 
@@ -311,6 +344,33 @@ export const DriverTable: React.FC<DriverTableProps> = ({
       <div className="flex items-center gap-2 px-2 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-widest bg-indigo-50/50 dark:bg-indigo-950/30 w-fit py-1 rounded-md">
         <ArrowUpAZ className="w-3 h-3" />
         Escalation Sorting: Oldest alerts prioritized at top
+      </div>
+
+      <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h4 className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">Connection {'>>'} Companies {'>>'} Drivers</h4>
+          <button
+            onClick={() => setFilters.setCompanyFilter('ALL')}
+            className="text-xs font-bold text-indigo-600 hover:text-indigo-700"
+          >
+            Show all companies
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {companyStats.map((c) => (
+            <button
+              key={c.name}
+              onClick={() => setFilters.setCompanyFilter(c.name)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${
+                filters.companyFilter === c.name
+                  ? 'bg-indigo-600 text-white border-indigo-600'
+                  : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+              }`}
+            >
+              {c.name} ({c.count})
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="overflow-x-auto bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 transition-colors">
@@ -680,6 +740,62 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                 >
                   <Save className="w-4 h-4" />
                   Save Driver
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {isCompanyModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 dark:bg-black/80 backdrop-blur-sm p-4 transition-all">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all border dark:border-slate-800">
+            <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-900">
+              <h3 className="text-lg font-bold text-slate-900 dark:text-white">Add Company</h3>
+              <button onClick={() => setIsCompanyModalOpen(false)} className="text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleAddCompanySubmit} className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-neutral-500 dark:text-neutral-400 uppercase mb-1">Company Name</label>
+                <input
+                  required
+                  value={newCompany.name}
+                  onChange={(e) => setNewCompany((prev) => ({ ...prev, name: e.target.value }))}
+                  className="w-full px-4 py-2 text-sm border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-950 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                  placeholder="e.g. Noor Logistics"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-neutral-500 dark:text-neutral-400 uppercase mb-1">Board</label>
+                {isAdmin ? (
+                  <select
+                    value={newCompany.board}
+                    onChange={(e) => setNewCompany((prev) => ({ ...prev, board: e.target.value }))}
+                    className="w-full px-4 py-2 text-sm border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-950 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                  >
+                    {boards.map(b => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                ) : (
+                  <div className="w-full px-4 py-2 text-sm border border-slate-200 dark:border-slate-800 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200">
+                    {fixedBoard || 'Board A'}
+                  </div>
+                )}
+              </div>
+              <div className="pt-4 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsCompanyModalOpen(false)}
+                  className="flex-1 px-4 py-2 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 rounded-lg text-sm font-bold hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 transition-colors"
+                >
+                  Save Company
                 </button>
               </div>
             </form>

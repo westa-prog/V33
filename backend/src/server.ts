@@ -734,6 +734,88 @@ app.post('/api/drivers/create', async (req, res) => {
     }
 });
 
+app.post('/api/companies/create', async (req, res) => {
+    try {
+        const { acting_user_id, name, board } = req.body || {};
+        if (!acting_user_id || !name) {
+            res.status(400).json({ error: 'acting_user_id and name are required.' });
+            return;
+        }
+
+        const normalizedActingUserId = String(acting_user_id).trim();
+        const normalizedName = String(name).trim();
+        if (!isUuid(normalizedActingUserId)) {
+            res.status(400).json({ error: 'A valid acting_user_id is required.' });
+            return;
+        }
+        if (normalizedName.length < 2) {
+            res.status(400).json({ error: 'Company name must be at least 2 characters.' });
+            return;
+        }
+
+        const supabase = getDb();
+        const { data: profile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', normalizedActingUserId)
+            .single();
+        const { data: userData } = await supabase.auth.admin.getUserById(normalizedActingUserId);
+        const meta = readUserMetadata(userData?.user);
+
+        const role = profile?.role || meta.role;
+        const adminId = profile?.admin_id || meta.admin_id;
+        const assignedBoards = pickAssignedBoards(profile).length > 0 ? pickAssignedBoards(profile) : meta.assigned_boards;
+        const isAdmin = role === 'admin' || String(profile?.email || userData?.user?.email || '').toLowerCase() === ADMIN_EMAIL;
+
+        let effectiveBoard = normalizeBoardName(String(board || '').trim()) || 'Board A';
+        if (isAdmin) {
+            if (!ALLOWED_BOARDS.has(effectiveBoard)) {
+                res.status(400).json({ error: 'Only Board A, Board B, or Board C are allowed.' });
+                return;
+            }
+        } else {
+            if (assignedBoards.length === 0) {
+                res.status(403).json({ error: 'Employee has no assigned boards.' });
+                return;
+            }
+            effectiveBoard = normalizeBoardName(assignedBoards[0]);
+        }
+
+        const boardId = effectiveBoard.toUpperCase().replace('BOARD ', '');
+        const { data: existing } = await supabase
+            .from('companies')
+            .select('id,name,board_id')
+            .eq('name', normalizedName)
+            .eq('board_id', boardId)
+            .maybeSingle();
+        if (existing?.id) {
+            res.json({ success: true, company: existing, existed: true });
+            return;
+        }
+
+        const createdBy = isAdmin ? normalizedActingUserId : (adminId || normalizedActingUserId);
+        const { data: inserted, error: insertError } = await supabase
+            .from('companies')
+            .insert({
+                name: normalizedName,
+                board_id: boardId,
+                created_by: createdBy
+            })
+            .select('id,name,board_id')
+            .single();
+
+        if (insertError) {
+            res.status(500).json({ error: insertError.message });
+            return;
+        }
+
+        res.json({ success: true, company: inserted });
+    } catch (e: any) {
+        console.error('[API] Company create failed:', e);
+        res.status(500).json({ error: e.message || 'Failed to create company.' });
+    }
+});
+
 const handleBroadcast = async (req: express.Request, res: express.Response) => {
     const files = req.files as Express.Multer.File[] | undefined;
 

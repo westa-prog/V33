@@ -884,6 +884,27 @@ const App: React.FC = () => {
     }
   };
 
+  const handleAddCompany = async (payload: { name: string; board?: string }) => {
+    if (!activeUserId) return;
+    try {
+      const endpoint = apiUrl('/api/companies/create');
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          acting_user_id: activeUserId,
+          name: payload.name,
+          board: isAdminUser ? payload.board : authUser?.assignedBoard
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error || `Request failed (${response.status})`);
+      toast.success(data?.existed ? 'Company already exists.' : 'Company created.');
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to create company.');
+    }
+  };
+
   const handleDeleteDriver = async (id: string) => {
     if (!isAdminUser) return;
     setDrivers(prev => prev.filter(d => d.id !== id));
@@ -1017,6 +1038,7 @@ const App: React.FC = () => {
                 setFilters={{ setSearchQuery, setEldFilter, setDutyFilter, setCompanyFilter, setBoardFilter }}
                 onUpdateDriver={handleUpdateDriver}
                 onAddDriver={handleAddDriver}
+                onAddCompany={handleAddCompany}
                 onDeleteDriver={handleDeleteDriver}
                 onManualSendEmail={handleManualSendEmail}
                 onResetDriver={handleResetDriver}
