@@ -85,6 +85,15 @@ const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 const ALLOWED_BOARDS = new Set(['Board A', 'Board B', 'Board C']);
 const ADMIN_EMAIL = 'westa@algogroup.us';
+const LEGACY_PSEUDO_EMAIL_DOMAIN = 'v33.local';
+const PSEUDO_EMAIL_DOMAIN = String(process.env.PSEUDO_EMAIL_DOMAIN || 'dilshod.algo')
+    .trim()
+    .toLowerCase()
+    .replace(/^@+/, '') || 'dilshod.algo';
+const isPseudoEmployeeEmail = (email: unknown) => {
+    const value = String(email || '').trim().toLowerCase();
+    return value.endsWith(`@${PSEUDO_EMAIL_DOMAIN}`) || value.endsWith(`@${LEGACY_PSEUDO_EMAIL_DOMAIN}`);
+};
 
 const cleanupUploads = (files: Express.Multer.File[] = []) => {
     for (const file of files) {
@@ -147,7 +156,7 @@ app.post('/api/admin/create-user', async (req, res) => {
 
         const supabase = getDb();
         const usernameSlug = normalizedUsername.toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.+|\.+$/g, '');
-        const pseudoEmail = `${usernameSlug || 'employee'}@v33.local`;
+        const pseudoEmail = `${usernameSlug || 'employee'}@${PSEUDO_EMAIL_DOMAIN}`;
 
         const { data, error } = await supabase.auth.admin.createUser({
             email: pseudoEmail,
@@ -460,11 +469,11 @@ app.post('/api/admin/repair-users', async (req, res) => {
         const supabase = getDb();
         const { data: candidates, error: candidateError } = await supabase
             .from('profiles')
-            .select('*')
-            .ilike('email', '%@v33.local')
-            .or('admin_id.is.null,role.is.null');
+            .select('*');
 
-        let list = candidates || [];
+        let list = (candidates || []).filter((row: any) =>
+            isPseudoEmployeeEmail(row?.email) || !row?.admin_id || !row?.role
+        );
         if (candidateError && /admin_id/i.test(String(candidateError.message || ''))) {
             let page = 1;
             const metaList: any[] = [];
@@ -476,7 +485,7 @@ app.post('/api/admin/repair-users', async (req, res) => {
                 }
                 const users = listData?.users || [];
                 for (const u of users) {
-                    if (String(u.email || '').endsWith('@v33.local')) {
+                    if (isPseudoEmployeeEmail(u.email)) {
                         metaList.push({
                             id: u.id,
                             email: u.email,

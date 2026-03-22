@@ -79,7 +79,7 @@ Response:
 {
   "success": true,
   "user": {},
-  "loginEmail": "johndoe@v33.local"
+  "loginEmail": "johndoe@dilshod.algo"
 }
 ```
 
@@ -120,6 +120,7 @@ Backend requires:
 - `SMTP_USER`
 - `SMTP_PASS`
 - `SMTP_FROM`
+- optional: `PSEUDO_EMAIL_DOMAIN` (default: `dilshod.algo`)
 - `PORT`
 
 ## Notes
