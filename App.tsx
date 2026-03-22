@@ -285,6 +285,7 @@ const App: React.FC = () => {
   const driverOwnerUserId = authUser?.role === 'employee' && authUser?.adminId
     ? authUser.adminId
     : activeUserId;
+  const driverScopeId = driverOwnerUserId || activeUserId;
   const allowedBoards = normalizeBoardList(authUser?.assignedBoards || (authUser?.assignedBoard ? [authUser.assignedBoard] : []));
   const fixedEmployeeBoard = !isAdminUser && allowedBoards.length === 1 ? allowedBoards[0] : undefined;
   const rawApiBaseUrl = ((import.meta as any).env.VITE_API_URL || '').trim();
@@ -347,6 +348,14 @@ const App: React.FC = () => {
 
     return data?.driver || null;
   }, [activeUserId, apiBaseUrl, drivers]);
+
+  const refreshDriversFromBackend = useCallback(async () => {
+    if (!driverScopeId) return [] as Driver[];
+    const refreshed = await fetchDrivers(driverScopeId);
+    setDrivers(refreshed);
+    setLastSync(new Date().toISOString());
+    return refreshed;
+  }, [driverScopeId]);
 
   const persistDriverReset = useCallback(async (driverIds: string[]) => {
     if (!activeUserId || driverIds.length === 0) return [] as Driver[];
@@ -556,7 +565,6 @@ const App: React.FC = () => {
     }
 
     let isDisposed = false;
-    const driverScopeId = driverOwnerUserId || activeUserId;
     const ownBoardId = !isAdminUser && allowedBoards.length === 1
       ? normalizeBoard(allowedBoards[0]).replace('Board ', '')
       : undefined;
@@ -710,7 +718,7 @@ const App: React.FC = () => {
       window.removeEventListener('focus', refreshOnFocus);
       document.removeEventListener('visibilitychange', refreshOnVisibility);
     };
-  }, [activeUserId, driverOwnerUserId, authUser?.email, authUser?.name, allowedBoards.join('|'), isAdminUser, syncAuthMetadataFromCurrentUser, user?.accessToken, user?.email, user?.name]);
+  }, [activeUserId, driverScopeId, authUser?.email, authUser?.name, allowedBoards.join('|'), isAdminUser, syncAuthMetadataFromCurrentUser, user?.accessToken, user?.email, user?.name]);
 
   useEffect(() => {
     if (!activeUserId) return;
@@ -810,8 +818,28 @@ const App: React.FC = () => {
     localStorage.removeItem(STORAGE_KEYS.liveMode);
   };
 
+  const accessibleDrivers = useMemo(() => {
+    if (isAdminUser) return hydratedDrivers;
+
+    const accessBoards = normalizeBoardList(authUser?.assignedBoards || (authUser?.assignedBoard ? [authUser.assignedBoard] : []));
+    const accessCompanies = (authUser?.assignedCompanies || []).map((company) => normalizeCompanyLabel(company));
+
+    return hydratedDrivers.filter((driver) => {
+      const matchesBoardAccess = accessBoards.length > 0
+        ? accessBoards.includes(normalizeBoard(driver.board))
+        : true;
+      const matchesCompanyAccess = accessCompanies.length > 0
+        ? accessCompanies.includes(normalizeCompanyLabel(driver.company))
+        : true;
+
+      return matchesBoardAccess && matchesCompanyAccess;
+    });
+  }, [authUser, hydratedDrivers, isAdminUser]);
+
   const filteredDrivers = useMemo(() => {
-    return hydratedDrivers.filter(driver => {
+    const sourceDrivers = accessibleDrivers;
+
+    return sourceDrivers.filter(driver => {
       const matchesName = driver.name.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesEld = eldFilter === 'ALL' || driver.eldStatus === eldFilter;
       const matchesDuty = dutyFilter === 'ALL' || driver.dutyStatus === dutyFilter;
@@ -822,18 +850,10 @@ const App: React.FC = () => {
         return matchesName && matchesEld && matchesDuty && matchesCompany && matchesBoard;
       }
 
-      const allowedBoards = normalizeBoardList(authUser?.assignedBoards || (authUser?.assignedBoard ? [authUser.assignedBoard] : []));
-      const allowedCompanies = (authUser?.assignedCompanies || []).map((company) => normalizeCompanyLabel(company));
-      const matchesBoard = allowedBoards.length > 0
-        ? allowedBoards.includes(normalizeBoard(driver.board))
-        : (boardFilter === 'ALL' || normalizeBoard(driver.board) === normalizeBoard(boardFilter));
-      const matchesAssignedCompany = allowedCompanies.length > 0
-        ? allowedCompanies.includes(normalizeCompanyLabel(driver.company))
-        : true;
-
-      return matchesName && matchesEld && matchesDuty && matchesCompany && matchesBoard && matchesAssignedCompany;
+      const matchesBoard = boardFilter === 'ALL' || normalizeBoard(driver.board) === normalizeBoard(boardFilter);
+      return matchesName && matchesEld && matchesDuty && matchesCompany && matchesBoard;
     });
-  }, [hydratedDrivers, searchQuery, eldFilter, dutyFilter, companyFilter, boardFilter, authUser, isAdminUser]);
+  }, [accessibleDrivers, searchQuery, eldFilter, dutyFilter, companyFilter, boardFilter, isAdminUser]);
 
   const stats = useMemo(() => {
     const violations = filteredDrivers.filter(d => d.eldStatus === ELDStatus.DISCONNECTED && [DutyStatus.DRIVING, DutyStatus.ON_DUTY].includes(d.dutyStatus)).length;
@@ -1084,7 +1104,7 @@ const App: React.FC = () => {
   // Keep alert sending user-controlled from "Send Alert" button.
   // This avoids immediate auto-send and keeps escalation visible in the table.
 
-  const handleUpdateDriver = async (id: string, updates: Partial<Driver>) => {
+  const handleUpdateDriver = useCallback(async (id: string, updates: Partial<Driver>) => {
     let previousDriver: Driver | undefined;
     let updatedDriver: Driver | undefined;
     let persistencePayload: Partial<Driver> | undefined;
@@ -1108,6 +1128,7 @@ const App: React.FC = () => {
         if (persistedDriver) {
           setDrivers(prev => prev.map(d => d.id === id ? { ...d, ...persistedDriver } : d));
         }
+        await refreshDriversFromBackend();
       } catch (error: any) {
         if (previousDriver) {
           setDrivers(prev => prev.map(d => d.id === id ? previousDriver! : d));
@@ -1116,7 +1137,7 @@ const App: React.FC = () => {
         throw error;
       }
     }
-  };
+  }, [activeUserId, persistDriverUpdate, refreshDriversFromBackend]);
 
   const handleAddDriver = async (data: Omit<Driver, 'id' | 'emailSent'>) => {
     if (!activeUserId) return;
@@ -1349,7 +1370,7 @@ const App: React.FC = () => {
           )}
         </header>
 
-        {activeTab === 'Dashboard' && <Dashboard drivers={filteredDrivers} assignedBoard={fixedEmployeeBoard} employeeName={isAdminUser ? undefined : authUser?.name} />}
+        {activeTab === 'Dashboard' && <Dashboard drivers={accessibleDrivers} assignedBoard={fixedEmployeeBoard} employeeName={isAdminUser ? undefined : authUser?.name} />}
 
         {activeTab === 'Connection' && (
           <div className="space-y-8">
@@ -1359,7 +1380,7 @@ const App: React.FC = () => {
             </div>
             <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800">
               <DriverTable
-                drivers={hydratedDrivers}
+                drivers={accessibleDrivers}
                 companies={companies}
                 filteredDrivers={filteredDrivers}
                 filters={{ searchQuery, eldFilter, dutyFilter, companyFilter, boardFilter }}
@@ -1381,9 +1402,9 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {activeTab === 'Profile Form' && <ProfileForm drivers={filteredDrivers} emailLogs={emailLogs} onSendReminder={handleProfileFormReminder} onUpdatePFDate={handleUpdatePFDate} />}
+        {activeTab === 'Profile Form' && <ProfileForm drivers={accessibleDrivers} emailLogs={emailLogs} onSendReminder={handleProfileFormReminder} onUpdatePFDate={handleUpdatePFDate} />}
         {activeTab === 'AI Assistant' && <AIAssistant userId={authUser?.uid} />}
-        {activeTab === 'Broadcast' && <EmailBroadcast drivers={filteredDrivers} assignedBoard={fixedEmployeeBoard} userId={activeUserId} userAccessToken={user?.accessToken} />}
+        {activeTab === 'Broadcast' && <EmailBroadcast drivers={accessibleDrivers} assignedBoard={fixedEmployeeBoard} userId={activeUserId} userAccessToken={user?.accessToken} />}
         {activeTab === 'History' && (
           <div className="space-y-4">
             {isAdminUser && (
@@ -1458,7 +1479,7 @@ const App: React.FC = () => {
             theme={theme}
             setTheme={setTheme}
             emailLogs={emailLogs}
-            drivers={filteredDrivers}
+            drivers={accessibleDrivers}
           />
         )}
       </main>

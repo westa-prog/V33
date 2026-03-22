@@ -1178,13 +1178,14 @@ app.patch('/api/drivers/:driverId', async (req, res) => {
         const currentBoardName = normalizeBoardName(existingDriver.board_id || existingDriver.companies?.board_id || '');
         const currentCompanyName = String(existingDriver.companies?.name || '').trim();
 
+        const normalizedAssignedBoards = assignedBoards.map(normalizeBoardName).filter(Boolean);
+
         if (!isAdmin) {
             if (assignedBoards.length === 0) {
                 res.status(403).json({ error: 'Employee has no assigned boards.' });
                 return;
             }
 
-            const normalizedAssignedBoards = assignedBoards.map(normalizeBoardName).filter(Boolean);
             if (currentBoardName && !normalizedAssignedBoards.includes(currentBoardName)) {
                 res.status(403).json({ error: 'Employee cannot update drivers outside assigned boards.' });
                 return;
@@ -1224,7 +1225,14 @@ app.patch('/api/drivers/:driverId', async (req, res) => {
         }
 
         if (!isAdmin) {
-            effectiveBoard = normalizeBoardName(assignedBoards[0]) || effectiveBoard;
+            const requestedBoard = typeof board === 'string' ? normalizeBoardName(board) : '';
+            if (requestedBoard && normalizedAssignedBoards.includes(requestedBoard)) {
+                effectiveBoard = requestedBoard;
+            } else if (currentBoardName && normalizedAssignedBoards.includes(currentBoardName)) {
+                effectiveBoard = currentBoardName;
+            } else {
+                effectiveBoard = normalizedAssignedBoards[0] || effectiveBoard;
+            }
         } else if (board !== undefined && !ALLOWED_BOARDS.has(effectiveBoard)) {
             res.status(400).json({ error: 'Only Board A, Board B, or Board C are allowed.' });
             return;
