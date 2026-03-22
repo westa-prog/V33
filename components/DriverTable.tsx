@@ -17,6 +17,7 @@ import {
   CheckCircle,
   RefreshCcw,
   Loader2,
+  PenSquare,
   ChevronRight,
   Building2,
   Users
@@ -82,8 +83,8 @@ export const DriverTable: React.FC<DriverTableProps> = ({
   const [selectedCompanyName, setSelectedCompanyName] = useState<string | null>(null);
   const [companySearchQuery, setCompanySearchQuery] = useState('');
   const [companyStatusFilter, setCompanyStatusFilter] = useState<'ALL' | 'ACTIVE' | 'ATTENTION' | 'INACTIVE'>('ALL');
-  const [editingCompanyName, setEditingCompanyName] = useState('');
-  const [editingCompanyBoard, setEditingCompanyBoard] = useState(fixedBoard || 'Board A');
+  const [companyMenuId, setCompanyMenuId] = useState<string | null>(null);
+  const [companyMenuBoard, setCompanyMenuBoard] = useState(fixedBoard || 'Board A');
   const [isSavingCompany, setIsSavingCompany] = useState(false);
 
   const handleSendFollowUp = async (driverId: string) => {
@@ -208,6 +209,7 @@ export const DriverTable: React.FC<DriverTableProps> = ({
       const status = attentionCount > 0 ? 'ATTENTION' : connectedCount > 0 ? 'ACTIVE' : 'INACTIVE';
 
       return {
+        id: companyRecord?.id || name,
         index: index + 1,
         name,
         board,
@@ -316,14 +318,14 @@ export const DriverTable: React.FC<DriverTableProps> = ({
     setNewCompany({ name: '', board: fixedBoard || 'Board A' });
   };
 
-  const handleSaveCompany = async () => {
-    if (!selectedCompanySummary?.id || !editingCompanyName.trim()) return;
+  const handleSaveCompany = async (companyId: string, companyName: string) => {
     setIsSavingCompany(true);
     try {
-      await onUpdateCompany(selectedCompanySummary.id, {
-        name: editingCompanyName.trim(),
-        board: editingCompanyBoard
+      await onUpdateCompany(companyId, {
+        name: companyName,
+        board: companyMenuBoard
       });
+      setCompanyMenuId(null);
     } catch (error: any) {
       alert(error?.message || 'Failed to update company.');
     } finally {
@@ -331,11 +333,11 @@ export const DriverTable: React.FC<DriverTableProps> = ({
     }
   };
 
-  const handleRemoveCompany = async () => {
-    if (!selectedCompanySummary?.id) return;
-    if (!window.confirm(`Delete ${selectedCompanySummary.name}?`)) return;
+  const handleRemoveCompany = async (companyId: string, companyName: string) => {
+    if (!window.confirm(`Delete ${companyName}?`)) return;
     try {
-      await onDeleteCompany(selectedCompanySummary.id);
+      await onDeleteCompany(companyId);
+      setCompanyMenuId(null);
       setSelectedCompanyName(null);
       setFilters.setCompanyFilter('ALL');
     } catch (error: any) {
@@ -352,8 +354,7 @@ export const DriverTable: React.FC<DriverTableProps> = ({
 
   useEffect(() => {
     if (!selectedCompanySummary) return;
-    setEditingCompanyName(selectedCompanySummary.name);
-    setEditingCompanyBoard(selectedCompanySummary.board || fixedBoard || 'Board A');
+    setCompanyMenuBoard(selectedCompanySummary.board || fixedBoard || 'Board A');
   }, [fixedBoard, selectedCompanySummary]);
 
   return (
@@ -503,6 +504,7 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                   <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Status</th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Drivers</th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Connected</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
@@ -546,6 +548,53 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                     </td>
                     <td className="px-6 py-4 text-sm font-semibold text-slate-900 dark:text-white">{company.totalDrivers}</td>
                     <td className="px-6 py-4 text-sm text-slate-700 dark:text-slate-300">{company.connectedCount}</td>
+                    <td className="px-6 py-4">
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCompanyMenuId((prev) => prev === company.id ? null : company.id);
+                            setCompanyMenuBoard(company.board);
+                          }}
+                          className="inline-flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-700 px-2.5 py-2 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
+                        >
+                          <PenSquare className="w-4 h-4" />
+                        </button>
+
+                        {companyMenuId === company.id && (
+                          <div className="absolute right-0 top-12 z-20 w-56 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 shadow-xl">
+                            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">Reassign Board</p>
+                            <select
+                              value={companyMenuBoard}
+                              onChange={(e) => setCompanyMenuBoard(e.target.value)}
+                              className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
+                            >
+                              {boards.map((board) => (
+                                <option key={board} value={board}>{board}</option>
+                              ))}
+                            </select>
+
+                            <div className="mt-3 flex flex-col gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleSaveCompany(company.id, company.name)}
+                                disabled={isSavingCompany}
+                                className="w-full rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
+                              >
+                                {isSavingCompany ? 'Saving...' : 'Save Board'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveCompany(company.id, company.name)}
+                                className="w-full rounded-lg bg-red-600 px-3 py-2 text-sm font-bold text-white hover:bg-red-700"
+                              >
+                                Delete Company
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -557,22 +606,8 @@ export const DriverTable: React.FC<DriverTableProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-5">
               <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Company</p>
-              <input
-                value={editingCompanyName}
-                onChange={(e) => setEditingCompanyName(e.target.value)}
-                className="mt-2 w-full bg-transparent text-xl font-black text-slate-900 dark:text-white outline-none"
-              />
-              <div className="mt-2">
-                <select
-                  value={editingCompanyBoard}
-                  onChange={(e) => setEditingCompanyBoard(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
-                >
-                  {boards.map((board) => (
-                    <option key={board} value={board}>{board}</option>
-                  ))}
-                </select>
-              </div>
+              <h4 className="mt-2 text-xl font-black text-slate-900 dark:text-white">{selectedCompanySummary?.name || selectedCompanyName}</h4>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{selectedCompanySummary?.board || 'Unassigned'}</p>
             </div>
             <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-5">
               <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Drivers</p>
@@ -582,22 +617,6 @@ export const DriverTable: React.FC<DriverTableProps> = ({
               <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Attention</p>
               <h4 className="mt-2 text-3xl font-black text-slate-900 dark:text-white">{selectedCompanySummary?.attentionCount || 0}</h4>
             </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleSaveCompany}
-              disabled={isSavingCompany || !editingCompanyName.trim()}
-              className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-bold hover:bg-indigo-700 disabled:opacity-50"
-            >
-              {isSavingCompany ? 'Saving...' : 'Save Company'}
-            </button>
-            <button
-              onClick={handleRemoveCompany}
-              className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-bold hover:bg-red-700"
-            >
-              Delete Company
-            </button>
           </div>
 
           <div className="flex items-center gap-2 px-2 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-widest bg-indigo-50/50 dark:bg-indigo-950/30 w-fit py-1 rounded-md">
