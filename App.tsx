@@ -227,7 +227,6 @@ const App: React.FC = () => {
   const [lastSync, setLastSync] = useState<string | undefined>();
   const [dbConnected, setDbConnected] = useState(false);
   const [companies, setCompanies] = useState<Company[]>([]);
-  const autoSendingRef = useRef<Set<string>>(new Set());
   const hasUserInteractedRef = useRef(false);
   const activeUserId = authUser?.uid;
   const googleClientId = ((window as any).__GOOGLE_CLIENT_ID__ || '').trim();
@@ -627,20 +626,27 @@ const App: React.FC = () => {
       ? renderEmailTemplate(selectedTemplate, driver)
       : body;
     let sentSuccess = true;
-    let sentVia: 'Simulation' | 'Gmail API' = 'Simulation';
+    let sentVia: 'Simulation' | 'SMTP' = 'Simulation';
 
     console.log(`Email Sending Mode: ${isLiveMode ? 'LIVE' : 'SIMULATION'}`);
 
-    if (isLiveMode && user?.accessToken && user.accessToken !== 'demo_token') {
-      console.log("Triggering Gmail API message to:", driver.email);
-      const res = await sendGmailMessage(user.accessToken, driver.email, subject, templatedBody);
+    if (isLiveMode) {
+      const formData = new FormData();
+      formData.append('recipients', JSON.stringify([driver.email]));
+      formData.append('subject', subject);
+      formData.append('message', templatedBody);
+      const res = await fetch(apiUrl('/api/broadcast'), {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json().catch(() => ({}));
       sentSuccess = res.ok;
-      sentVia = 'Gmail API';
-      if (!sentSuccess) throw new Error(res.error || "Gmail API failed to send message.");
+      sentVia = 'SMTP';
+      if (!sentSuccess) throw new Error(data?.error || `Backend email send failed (${res.status}).`);
     } else {
       console.log("Simulation mode: No real email sent.");
       if (!options?.silent) {
-        alert("Note: App is in SIMULATION MODE. No real email was sent. Connect your Google account or toggle Live Mode ON in the Database panel.");
+        alert("Note: App is in SIMULATION MODE. No real email was sent. Toggle Live Mode ON.");
       }
     }
 
@@ -704,13 +710,21 @@ const App: React.FC = () => {
       : body;
 
     let sentSuccess = true;
-    let sentVia: 'Simulation' | 'Gmail API' = 'Simulation';
+    let sentVia: 'Simulation' | 'SMTP' = 'Simulation';
 
-    if (isLiveMode && user?.accessToken && user.accessToken !== 'demo_token') {
-      const res = await sendGmailMessage(user.accessToken, driver.email, subject, finalBody);
+    if (isLiveMode) {
+      const formData = new FormData();
+      formData.append('recipients', JSON.stringify([driver.email]));
+      formData.append('subject', subject);
+      formData.append('message', finalBody);
+      const res = await fetch(apiUrl('/api/broadcast'), {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json().catch(() => ({}));
       sentSuccess = res.ok;
-      sentVia = 'Gmail API';
-      if (!sentSuccess) throw new Error(res.error || "Gmail API failed to send message.");
+      sentVia = 'SMTP';
+      if (!sentSuccess) throw new Error(data?.error || `Backend email send failed (${res.status}).`);
     } else {
       alert("Note: App is in SIMULATION MODE. No real email was sent. Toggle Live Mode ON.");
     }
@@ -830,28 +844,8 @@ const App: React.FC = () => {
     });
   }, [drivers, processAlertLogic]);
 
-  useEffect(() => {
-    if (!drivers.length) return;
-
-    const candidates = drivers.filter((driver) => {
-      const isDisconnected = driver.eldStatus === ELDStatus.DISCONNECTED;
-      const isEligibleDuty = driver.dutyStatus === DutyStatus.DRIVING || driver.dutyStatus === DutyStatus.ON_DUTY;
-      const isAlreadySending = autoSendingRef.current.has(driver.id);
-      return isDisconnected && isEligibleDuty && !!driver.hasPendingAlert && !isAlreadySending;
-    });
-
-    candidates.forEach(async (driver) => {
-      autoSendingRef.current.add(driver.id);
-      try {
-        const automationType = driver.dutyStatus === DutyStatus.DRIVING ? 'driving_disconnected' : 'onduty_disconnected';
-        await handleManualSendEmail(driver.id, { silent: true, automationType });
-      } catch (error) {
-        console.error(`Auto alert send failed for ${driver.name}:`, error);
-      } finally {
-        autoSendingRef.current.delete(driver.id);
-      }
-    });
-  }, [drivers, handleManualSendEmail]);
+  // Keep alert sending user-controlled from "Send Alert" button.
+  // This avoids immediate auto-send and keeps escalation visible in the table.
 
   const handleUpdateDriver = async (id: string, updates: Partial<Driver>) => {
     if (!isAdminUser) return;
@@ -1011,6 +1005,13 @@ const App: React.FC = () => {
               {googleClientId ? 'Connect Google' : 'Google ID Missing'}
             </button>
           )}
+          <DatabaseSyncControl
+            isConnected={dbConnected}
+            isSyncing={isSyncing}
+            lastSync={lastSync}
+            isLiveMode={isLiveMode}
+            onToggleLiveMode={setIsLiveMode}
+          />
           {user && (
             <div className="flex items-center gap-4">
               <div className="hidden md:flex flex-col items-end pt-1">
