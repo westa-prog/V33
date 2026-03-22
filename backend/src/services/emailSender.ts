@@ -1,6 +1,7 @@
 import nodemailer from 'nodemailer';
 
 type Attachment = { filename: string; path: string; cid?: string };
+type SendResult = { ok: boolean; error?: string };
 
 const mockTransporter = {
     sendMail: async (mailOptions: any) => {
@@ -11,34 +12,62 @@ const mockTransporter = {
     }
 };
 
-let transporter: any = mockTransporter;
+let transporters: any[] = [mockTransporter];
 
 const smtpHost = process.env.SMTP_HOST;
 const smtpUser = process.env.SMTP_USER;
 const smtpPass = process.env.SMTP_PASS;
 const smtpPort = Number(process.env.SMTP_PORT) || 587;
-const smtpSecure = smtpPort === 465;
+const smtpFallbackPort = Number(process.env.SMTP_FALLBACK_PORT) || (smtpPort === 587 ? 465 : 587);
 
-if (smtpHost && smtpUser && smtpPass) {
-    transporter = nodemailer.createTransport({
+const buildTransporter = (port: number) => {
+    const secure = port === 465;
+    return nodemailer.createTransport({
         host: smtpHost,
-        port: smtpPort,
-        secure: smtpSecure,
-        requireTLS: !smtpSecure,
+        port,
+        secure,
+        requireTLS: !secure,
         auth: {
             user: smtpUser,
             pass: smtpPass
         },
-        connectionTimeout: 15000,
+        connectionTimeout: 12000,
         greetingTimeout: 10000,
-        socketTimeout: 20000
+        socketTimeout: 20000,
+        tls: { minVersion: 'TLSv1.2' }
     });
+};
+
+if (smtpHost && smtpUser && smtpPass) {
+    const primary = buildTransporter(smtpPort);
+    transporters = [primary];
     console.log(`[EMAIL] SMTP initialized for host=${smtpHost}:${smtpPort}`);
+
+    if (smtpFallbackPort !== smtpPort) {
+        transporters.push(buildTransporter(smtpFallbackPort));
+        console.log(`[EMAIL] SMTP fallback configured for host=${smtpHost}:${smtpFallbackPort}`);
+    }
 } else {
     console.log('[EMAIL] No complete SMTP config found. Running in simulation mode.');
 }
 
 const FROM = process.env.SMTP_FROM || '"Leader A1 Fleet System" <noreply@leadera1.com>';
+
+const sendViaFallback = async (mailOptions: any): Promise<SendResult> => {
+    let lastError = '';
+    for (let i = 0; i < transporters.length; i += 1) {
+        try {
+            const info = await transporters[i].sendMail(mailOptions);
+            return { ok: true, error: info?.messageId };
+        } catch (e: any) {
+            const message = e?.message || String(e);
+            const code = e?.code ? ` (${e.code})` : '';
+            lastError = `${message}${code}`;
+            console.error(`[EMAIL] Transport attempt ${i + 1} failed:`, e);
+        }
+    }
+    return { ok: false, error: lastError || 'Unknown email error' };
+};
 
 export const sendReminderEmail = async (to: string, driverName: string, days: number): Promise<boolean> => {
     try {
@@ -57,8 +86,9 @@ export const sendReminderEmail = async (to: string, driverName: string, days: nu
                 </div>
             `
         };
-        const info = await transporter.sendMail(mailOptions);
-        console.log(`[EMAIL] ${days}-day reminder sent to ${to} (ID: ${info.messageId})`);
+        const result = await sendViaFallback(mailOptions);
+        if (!result.ok) throw new Error(result.error);
+        console.log(`[EMAIL] ${days}-day reminder sent to ${to}`);
         return true;
     } catch (e) {
         console.error(`[EMAIL] Failed to send to ${to}:`, e);
@@ -83,8 +113,9 @@ export const sendDisconnectionEmail = async (to: string, driverName: string): Pr
                 </div>
             `
         };
-        const info = await transporter.sendMail(mailOptions);
-        console.log(`[EMAIL] Disconnection alert sent to ${to} (ID: ${info.messageId})`);
+        const result = await sendViaFallback(mailOptions);
+        if (!result.ok) throw new Error(result.error);
+        console.log(`[EMAIL] Disconnection alert sent to ${to}`);
         return true;
     } catch (e) {
         console.error(`[EMAIL] Failed to send disconnection alert to ${to}:`, e);
@@ -97,8 +128,8 @@ export const sendCustomBroadcastEmail = async (
     subject: string,
     htmlContent: string,
     attachments: Attachment[] = []
-): Promise<boolean> => {
-    if (to.length === 0) return false;
+): Promise<SendResult> => {
+    if (to.length === 0) return { ok: false, error: 'No recipients provided.' };
 
     try {
         const singleRecipient = to.length === 1;
@@ -110,11 +141,14 @@ export const sendCustomBroadcastEmail = async (
             html: htmlContent,
             attachments
         };
-        const info = await transporter.sendMail(mailOptions);
-        console.log(`[EMAIL] Broadcast sent to ${to.length} recipients (ID: ${info.messageId})`);
-        return true;
+        const result = await sendViaFallback(mailOptions);
+        if (!result.ok) {
+            return { ok: false, error: result.error || 'SMTP send failed.' };
+        }
+        console.log(`[EMAIL] Broadcast sent to ${to.length} recipients`);
+        return { ok: true };
     } catch (e) {
         console.error('[EMAIL] Failed to send broadcast:', e);
-        return false;
+        return { ok: false, error: e instanceof Error ? e.message : 'Unknown broadcast error' };
     }
 };

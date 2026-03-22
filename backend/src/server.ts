@@ -281,10 +281,10 @@ app.post('/api/admin/create-user', async (req, res) => {
             </div>
         `;
 
-        const credentialEmailSent = await sendCustomBroadcastEmail([normalizedAdminEmail], subject, message, []);
-        if (!credentialEmailSent) {
+        const credentialEmailResult = await sendCustomBroadcastEmail([normalizedAdminEmail], subject, message, []);
+        if (!credentialEmailResult.ok) {
             res.status(502).json({
-                error: 'User created, but failed to send credential email to admin.',
+                error: `User created, but failed to send credential email to admin: ${credentialEmailResult.error || 'Unknown SMTP error'}`,
                 userCreated: true,
                 loginEmail: pseudoEmail
             });
@@ -971,10 +971,10 @@ const handleBroadcast = async (req: express.Request, res: express.Response) => {
             path: file.path
         }));
 
-        const success = await sendCustomBroadcastEmail(normalizedRecipients, normalizedSubject, normalizedMessage, emailAttachments);
+        const sendResult = await sendCustomBroadcastEmail(normalizedRecipients, normalizedSubject, normalizedMessage, emailAttachments);
 
-        if (!success) {
-            res.status(500).json({ error: 'Failed to send broadcast email.' });
+        if (!sendResult.ok) {
+            res.status(500).json({ error: `Failed to send broadcast email: ${sendResult.error || 'Unknown SMTP error'}` });
             return;
         }
 
