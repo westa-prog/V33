@@ -191,12 +191,27 @@ const deriveDriverAlertState = (driver: Driver): Partial<Driver> => {
   const canSendNow = !lastSent || (Date.now() - lastSent) >= oneHour;
 
   if (isDisconnected && isAtWork) {
-    return { hasPendingAlert: canSendNow };
+    return {
+      followUp: driver.emailSent ? FollowUpStatus.ACTION_REQUIRED : FollowUpStatus.CONNECT,
+      hasPendingAlert: canSendNow,
+      emailSent: driver.emailSent
+    };
+  }
+
+  if (isDisconnected) {
+    return {
+      followUp: driver.followUp && driver.followUp !== FollowUpStatus.NONE
+        ? driver.followUp
+        : (driver.emailSent ? FollowUpStatus.ACTION_REQUIRED : FollowUpStatus.CONNECT),
+      hasPendingAlert: false,
+      emailSent: driver.emailSent
+    };
   }
 
   return {
+    followUp: FollowUpStatus.NONE,
     hasPendingAlert: false,
-    emailSent: isDisconnected ? driver.emailSent : false
+    emailSent: false
   };
 };
 
@@ -909,7 +924,11 @@ const App: React.FC = () => {
 
   const processAlertLogic = useCallback(async (driver: Driver) => {
     const derived = deriveDriverAlertState(driver);
-    if (driver.hasPendingAlert !== derived.hasPendingAlert || driver.emailSent !== derived.emailSent) {
+    if (
+      driver.hasPendingAlert !== derived.hasPendingAlert
+      || driver.emailSent !== derived.emailSent
+      || driver.followUp !== derived.followUp
+    ) {
       setDrivers(prev => prev.map(d => d.id === driver.id ? { ...d, ...derived } : d));
     }
   }, []);

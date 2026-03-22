@@ -101,6 +101,17 @@ const readUserMetadata = (user: any) => {
 const normalizeEmail = (value: unknown) => String(value || '').trim().toLowerCase();
 const normalizeCompanyName = (value: unknown) => String(value || '').trim().replace(/\s+/g, ' ');
 const normalizeCompanyList = (value: string[]) => value.map((item) => normalizeCompanyName(item).toLowerCase()).filter(Boolean);
+const DRIVER_FOLLOW_UP = {
+    ACTION_REQUIRED: 'Action required',
+    CONNECT: 'Connect',
+    NONE: 'None'
+} as const;
+const DRIVER_STATUS = {
+    CONNECTED: 'Connected',
+    DISCONNECTED: 'Disconnected',
+    DRIVING: 'Driving',
+    ON_DUTY: 'On Duty'
+} as const;
 const normalizeRole = (value: unknown): 'admin' | 'employee' => {
     const role = String(value || '').trim().toLowerCase();
     return role === 'admin' ? 'admin' : 'employee';
@@ -110,6 +121,49 @@ const isProfileSchemaMismatch = (message: string) => {
 };
 const isMissingEmployeeAssignmentsTable = (message: string) => {
     return /employee_assignments|relation .* does not exist|Could not find the table/i.test(message || '');
+};
+const deriveDriverSyncState = (input: {
+    eldStatus?: string | null;
+    dutyStatus?: string | null;
+    followUp?: string | null;
+    emailSent?: boolean;
+    lastEmailTime?: string | null;
+    lastSentAt?: string | null;
+}) => {
+    const eldStatus = String(input.eldStatus || '').trim();
+    const dutyStatus = String(input.dutyStatus || '').trim();
+    const followUp = String(input.followUp || '').trim();
+    const emailSent = Boolean(input.emailSent);
+    const lastSentRaw = String(input.lastSentAt || input.lastEmailTime || '').trim();
+    const lastSentAtMs = lastSentRaw ? new Date(lastSentRaw).getTime() : 0;
+    const cooldownMs = 60 * 60 * 1000;
+    const canSendNow = !lastSentAtMs || (Date.now() - lastSentAtMs) >= cooldownMs;
+    const isDisconnected = eldStatus === DRIVER_STATUS.DISCONNECTED;
+    const isAtWork = dutyStatus === DRIVER_STATUS.DRIVING || dutyStatus === DRIVER_STATUS.ON_DUTY;
+
+    if (!isDisconnected) {
+        return {
+            followUp: DRIVER_FOLLOW_UP.NONE,
+            emailSent: false,
+            hasPendingAlert: false
+        };
+    }
+
+    if (isAtWork) {
+        return {
+            followUp: emailSent ? DRIVER_FOLLOW_UP.ACTION_REQUIRED : DRIVER_FOLLOW_UP.CONNECT,
+            emailSent,
+            hasPendingAlert: canSendNow
+        };
+    }
+
+    return {
+        followUp: followUp && followUp !== DRIVER_FOLLOW_UP.NONE
+            ? followUp
+            : (emailSent ? DRIVER_FOLLOW_UP.ACTION_REQUIRED : DRIVER_FOLLOW_UP.CONNECT),
+        emailSent,
+        hasPendingAlert: false
+    };
 };
 
 const upsertProfileAssignments = async (
@@ -1016,6 +1070,12 @@ app.post('/api/drivers/create', async (req, res) => {
 
         const nowIso = new Date().toISOString();
         const driverId = crypto.randomUUID();
+        const initialDriverState = deriveDriverSyncState({
+            eldStatus: String(eldStatus || DRIVER_STATUS.CONNECTED),
+            dutyStatus: String(dutyStatus || 'Not Set'),
+            followUp: typeof followUp === 'string' ? followUp : null,
+            emailSent: false
+        });
         const driverRowFull = {
             id: driverId,
             name: normalizedName,
@@ -1025,11 +1085,11 @@ app.post('/api/drivers/create', async (req, res) => {
             created_by: normalizedActingUserId,
             devicetype: String(deviceType || ''),
             appversion: String(appVersion || ''),
-            eldstatus: String(eldStatus || 'Connected'),
+            eldstatus: String(eldStatus || DRIVER_STATUS.CONNECTED),
             dutystatus: String(dutyStatus || 'Not Set'),
-            followup: String(followUp || 'None'),
-            emailsent: false,
-            haspendingalert: false,
+            followup: initialDriverState.followUp,
+            emailsent: initialDriverState.emailSent,
+            haspendingalert: initialDriverState.hasPendingAlert,
             created_at: nowIso,
             updated_at: nowIso
         };
@@ -1081,11 +1141,12 @@ app.post('/api/drivers/create', async (req, res) => {
                 createdBy: normalizedActingUserId,
                 deviceType: String(deviceType || ''),
                 appVersion: String(appVersion || ''),
-                eldStatus: String(eldStatus || 'Connected'),
+                eldStatus: String(eldStatus || DRIVER_STATUS.CONNECTED),
                 dutyStatus: String(dutyStatus || 'Not Set'),
-                followUp: String(followUp || 'None'),
-                emailSent: false,
-                hasPendingAlert: false
+                followUp: initialDriverState.followUp,
+                emailSent: initialDriverState.emailSent,
+                hasPendingAlert: initialDriverState.hasPendingAlert,
+                updatedAt: nowIso
             }
         });
     } catch (e: any) {
@@ -1305,15 +1366,37 @@ app.patch('/api/drivers/:driverId', async (req, res) => {
         if (appVersion !== undefined) updates.appversion = String(appVersion || '');
         if (eldStatus !== undefined) updates.eldstatus = eldStatus ? String(eldStatus) : null;
         if (dutyStatus !== undefined) updates.dutystatus = dutyStatus ? String(dutyStatus) : null;
-        if (followUp !== undefined) updates.followup = followUp ? String(followUp) : null;
-        if (emailSent !== undefined) updates.emailsent = Boolean(emailSent);
-        if (hasPendingAlert !== undefined) updates.haspendingalert = Boolean(hasPendingAlert);
         if (lastEmailTime !== undefined) updates.lastemailtime = lastEmailTime || null;
         if (lastSentAt !== undefined) updates.lastsentat = lastSentAt || null;
         if (lastPFUpdate !== undefined) updates.lastpfupdate = lastPFUpdate || null;
         if (lastProfileReminderAt !== undefined) updates.lastprofilereminderat = lastProfileReminderAt || null;
         if (last3DayEmail !== undefined) updates.last3dayemail = last3DayEmail || null;
         if (last5DayEmail !== undefined) updates.last5dayemail = last5DayEmail || null;
+
+        const derivedDriverState = deriveDriverSyncState({
+            eldStatus: eldStatus !== undefined
+                ? (eldStatus ? String(eldStatus) : null)
+                : (existingDriver.eldstatus || null),
+            dutyStatus: dutyStatus !== undefined
+                ? (dutyStatus ? String(dutyStatus) : null)
+                : (existingDriver.dutystatus || null),
+            followUp: followUp !== undefined
+                ? (followUp ? String(followUp) : null)
+                : (existingDriver.followup || null),
+            emailSent: emailSent !== undefined
+                ? Boolean(emailSent)
+                : Boolean(existingDriver.emailsent),
+            lastEmailTime: lastEmailTime !== undefined
+                ? (lastEmailTime || null)
+                : (existingDriver.lastemailtime || null),
+            lastSentAt: lastSentAt !== undefined
+                ? (lastSentAt || null)
+                : (existingDriver.lastsentat || null)
+        });
+
+        updates.followup = derivedDriverState.followUp;
+        updates.emailsent = derivedDriverState.emailSent;
+        updates.haspendingalert = derivedDriverState.hasPendingAlert;
 
         const { error: updateError } = await supabase
             .from('drivers_new')
