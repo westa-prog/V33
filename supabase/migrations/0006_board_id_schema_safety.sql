@@ -39,12 +39,17 @@ end
 where board_id is null;
 
 -- drivers_new.board_id
-alter table public.drivers_new
-  add column if not exists board_id text;
+do $$
+begin
+  if to_regclass('public.drivers_new') is not null then
+    alter table public.drivers_new
+      add column if not exists board_id text;
+  end if;
+end $$;
 
 do $$
 begin
-  if exists (
+  if to_regclass('public.drivers_new') is not null and exists (
     select 1
     from information_schema.columns
     where table_schema='public' and table_name='drivers_new' and column_name='board'
@@ -65,4 +70,9 @@ end $$;
 
 create index if not exists companies_board_id_idx on public.companies(board_id);
 create index if not exists profiles_board_id_idx on public.profiles(board_id);
-create index if not exists idx_drivers_new_board on public.drivers_new(board_id);
+do $$
+begin
+  if to_regclass('public.drivers_new') is not null then
+    create index if not exists idx_drivers_new_board on public.drivers_new(board_id);
+  end if;
+end $$;
