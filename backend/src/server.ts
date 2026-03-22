@@ -45,6 +45,15 @@ const normalizeBoardName = (value: unknown): string => {
     if (upper === 'C' || upper === 'BOARD C') return 'Board C';
     return raw;
 };
+const boardNameToId = (value: unknown): string | null => {
+    const normalized = normalizeBoardName(value);
+    if (!normalized) return null;
+    const upper = normalized.toUpperCase();
+    if (upper === 'BOARD A' || upper === 'A') return 'A';
+    if (upper === 'BOARD B' || upper === 'B') return 'B';
+    if (upper === 'BOARD C' || upper === 'C') return 'C';
+    return null;
+};
 const pickAssignedBoards = (profile: any): string[] => {
     if (Array.isArray(profile?.assigned_boards)) {
         return normalizeList(profile.assigned_boards).map(normalizeBoardName).filter(Boolean);
@@ -84,7 +93,7 @@ const readUserMetadata = (user: any) => {
     };
 };
 const isProfileSchemaMismatch = (message: string) => {
-    return /assigned_boards|assigned_board|assigned_companies|admin_id/i.test(message || '');
+    return /assigned_boards|assigned_board|assigned_companies|admin_id|board_id|company_id/i.test(message || '');
 };
 
 const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
@@ -134,6 +143,7 @@ app.post('/api/admin/create-user', async (req, res) => {
         const normalizedAdminEmail = String(admin_email).trim().toLowerCase();
         const normalizedBoards = normalizeList(assigned_boards).map(normalizeBoardName).filter(Boolean);
         const normalizedCompanies = normalizeList(assigned_companies);
+        const primaryBoardId = boardNameToId(normalizedBoards[0] || null);
 
         if (normalizedUsername.length < 3) {
             res.status(400).json({ error: 'Username must be at least 3 characters.' });
@@ -187,10 +197,11 @@ app.post('/api/admin/create-user', async (req, res) => {
             admin_id,
             role: 'employee',
             assigned_boards: normalizedBoards,
-            assigned_companies: normalizedCompanies
+            assigned_companies: normalizedCompanies,
+            board_id: primaryBoardId
         }, { onConflict: 'id' });
 
-        if (profileUpsertError && /assigned_boards|assigned_companies/i.test(String(profileUpsertError.message || ''))) {
+        if (profileUpsertError && isProfileSchemaMismatch(String(profileUpsertError.message || ''))) {
             const legacyPayload: any = {
                 id: newUserId,
                 email: pseudoEmail,
@@ -338,6 +349,7 @@ app.patch('/api/admin/users/:userId', async (req, res) => {
 
         const normalizedBoards = normalizeList(assigned_boards).map(normalizeBoardName).filter(Boolean);
         const normalizedCompanies = normalizeList(assigned_companies);
+        const primaryBoardId = boardNameToId(normalizedBoards[0] || null);
         if (normalizedBoards.some((board) => !ALLOWED_BOARDS.has(board))) {
             res.status(400).json({ error: 'Only Board A, Board B, or Board C are allowed.' });
             return;
@@ -383,11 +395,12 @@ app.patch('/api/admin/users/:userId', async (req, res) => {
             .from('profiles')
             .update({
                 assigned_boards: normalizedBoards,
-                assigned_companies: normalizedCompanies
+                assigned_companies: normalizedCompanies,
+                board_id: primaryBoardId
             })
             .eq('id', userId);
 
-        if (profileUpdateError && /assigned_boards|assigned_companies/i.test(String(profileUpdateError.message || ''))) {
+        if (profileUpdateError && isProfileSchemaMismatch(String(profileUpdateError.message || ''))) {
             const legacyUpdate: any = {
                 assigned_board: normalizedBoards[0] || null
             };
@@ -524,7 +537,8 @@ app.post('/api/admin/repair-users', async (req, res) => {
                 .update({
                     admin_id: row.admin_id || normalizedAdminId,
                     role: 'employee',
-                    assigned_boards: needsBoards ? normalizedBoards : currentBoards
+                    assigned_boards: needsBoards ? normalizedBoards : currentBoards,
+                    board_id: boardNameToId((needsBoards ? normalizedBoards : currentBoards)[0] || null)
                 })
                 .eq('id', row.id);
 
@@ -570,7 +584,7 @@ app.post('/api/admin/repair-users', async (req, res) => {
 
 app.post('/api/drivers/create', async (req, res) => {
     try {
-        const { acting_user_id, name, email, company, company_id, board, deviceType, appVersion, eldStatus, dutyStatus, followUp } = req.body || {};
+        const { acting_user_id, name, email, company, company_id, board, dutyStatus } = req.body || {};
 
         if (!acting_user_id || !name || !email || !company) {
             res.status(400).json({ error: 'acting_user_id, name, email, and company are required.' });
@@ -700,13 +714,6 @@ app.post('/api/drivers/create', async (req, res) => {
             company_id: resolvedCompanyId,
             board_id: effectiveBoard.toUpperCase().replace('BOARD ', ''),
             created_by: normalizedActingUserId,
-            devicetype: String(deviceType || ''),
-            appversion: String(appVersion || ''),
-            eldstatus: String(eldStatus || 'Connected'),
-            dutystatus: String(dutyStatus || 'Not Set'),
-            followup: String(followUp || 'None'),
-            emailsent: false,
-            haspendingalert: false,
             created_at: nowIso,
             updated_at: nowIso
         };
