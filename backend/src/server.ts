@@ -584,7 +584,7 @@ app.post('/api/admin/repair-users', async (req, res) => {
 
 app.post('/api/drivers/create', async (req, res) => {
     try {
-        const { acting_user_id, name, email, company, company_id, board, dutyStatus } = req.body || {};
+        const { acting_user_id, name, email, company, company_id, board, deviceType, appVersion, eldStatus, dutyStatus, followUp } = req.body || {};
 
         if (!acting_user_id || !name || !email || !company) {
             res.status(400).json({ error: 'acting_user_id, name, email, and company are required.' });
@@ -675,12 +675,24 @@ app.post('/api/drivers/create', async (req, res) => {
                 return;
             }
         }
+        const effectiveBoardId = boardNameToId(effectiveBoard);
+        if (!effectiveBoardId) {
+            res.status(400).json({ error: 'Invalid board mapping.' });
+            return;
+        }
+
+        // Self-heal legacy profiles so RLS reads board_id correctly for employees.
+        await supabase
+            .from('profiles')
+            .update({ board_id: effectiveBoardId })
+            .eq('id', normalizedActingUserId)
+            .is('board_id', null);
 
         let resolvedCompanyId: string | null = null;
         if (company_id && isUuid(String(company_id))) {
             resolvedCompanyId = String(company_id);
         } else {
-            const targetBoardId = normalizedBoardId || (effectiveBoard.toUpperCase().replace('BOARD ', ''));
+            const targetBoardId = normalizedBoardId || effectiveBoardId;
             const { data: existingCompany } = await supabase
                 .from('companies')
                 .select('id')
@@ -707,18 +719,39 @@ app.post('/api/drivers/create', async (req, res) => {
 
         const nowIso = new Date().toISOString();
         const driverId = crypto.randomUUID();
-        const driverRow = {
+        const driverRowFull = {
             id: driverId,
             name: normalizedName,
             email: normalizedEmail,
             company_id: resolvedCompanyId,
-            board_id: effectiveBoard.toUpperCase().replace('BOARD ', ''),
+            board_id: effectiveBoardId,
+            created_by: normalizedActingUserId,
+            devicetype: String(deviceType || ''),
+            appversion: String(appVersion || ''),
+            eldstatus: String(eldStatus || 'Connected'),
+            dutystatus: String(dutyStatus || 'Not Set'),
+            followup: String(followUp || 'None'),
+            emailsent: false,
+            haspendingalert: false,
+            created_at: nowIso,
+            updated_at: nowIso
+        };
+        const driverRowMinimal = {
+            id: driverId,
+            name: normalizedName,
+            email: normalizedEmail,
+            company_id: resolvedCompanyId,
+            board_id: effectiveBoardId,
             created_by: normalizedActingUserId,
             created_at: nowIso,
             updated_at: nowIso
         };
 
-        const { error: insertError } = await supabase.from('drivers_new').insert(driverRow);
+        let { error: insertError } = await supabase.from('drivers_new').insert(driverRowFull);
+        if (insertError && /column .* does not exist/i.test(String(insertError.message || ''))) {
+            const fallback = await supabase.from('drivers_new').insert(driverRowMinimal);
+            insertError = fallback.error || null;
+        }
         if (insertError) {
             res.status(500).json({ error: insertError.message });
             return;
@@ -745,7 +778,7 @@ app.post('/api/drivers/create', async (req, res) => {
                 name: normalizedName,
                 email: normalizedEmail,
                 company_id: resolvedCompanyId,
-                board_id: effectiveBoard.toUpperCase().replace('BOARD ', ''),
+                board_id: effectiveBoardId,
                 company: normalizedCompany,
                 board: effectiveBoard
             }
@@ -803,7 +836,19 @@ app.post('/api/companies/create', async (req, res) => {
             effectiveBoard = normalizeBoardName(assignedBoards[0]);
         }
 
-        const boardId = effectiveBoard.toUpperCase().replace('BOARD ', '');
+        const boardId = boardNameToId(effectiveBoard);
+        if (!boardId) {
+            res.status(400).json({ error: 'Invalid board mapping.' });
+            return;
+        }
+
+        // Self-heal legacy profiles so RLS can return board-scoped companies to employee.
+        await supabase
+            .from('profiles')
+            .update({ board_id: boardId })
+            .eq('id', normalizedActingUserId)
+            .is('board_id', null);
+
         const { data: existing } = await supabase
             .from('companies')
             .select('id,name,board_id')
