@@ -152,7 +152,8 @@ export const ProfileForm: React.FC<ProfileFormProps> = ({ drivers, emailLogs, on
             await onSendReminder(driver.id, days);
         } catch (e) {
             console.error(e);
-            alert("Failed to send reminder to " + driver.name + ". Check Live Mode and backend SMTP configuration.");
+            const detail = e instanceof Error ? e.message : 'Unknown backend error';
+            alert("Failed to send reminder to " + driver.name + ". " + detail);
         } finally {
             setSendingState(null);
         }

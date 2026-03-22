@@ -19,6 +19,21 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [name, setName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const handleGoogleAppLogin = async () => {
+    try {
+      setIsSubmitting(true);
+      const redirectTo = window.location.origin;
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo }
+      });
+      if (error) throw error;
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Google login failed.');
+      setIsSubmitting(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
@@ -155,6 +170,14 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 Sign Up
               </button>
             </div>
+
+            <button
+              onClick={handleGoogleAppLogin}
+              disabled={isSubmitting}
+              className="w-full mb-5 py-3 bg-white text-slate-900 rounded-xl font-bold border border-neutral-300 hover:bg-neutral-100 transition-all disabled:opacity-60"
+            >
+              Sign in with Google
+            </button>
 
             <form onSubmit={handleSubmit} className="space-y-5">
               {isSignUp && (
