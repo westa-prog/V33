@@ -99,8 +99,17 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ userId }) => {
 
     try {
       await addAIMessage(userId, 'user', messageText);
+      const apiKey =
+        ((import.meta as any).env?.VITE_GEMINI_API_KEY as string | undefined) ||
+        ((import.meta as any).env?.GEMINI_API_KEY as string | undefined) ||
+        ((process as any)?.env?.GEMINI_API_KEY as string | undefined) ||
+        ((process as any)?.env?.API_KEY as string | undefined) ||
+        '';
+      if (!apiKey) {
+        throw new Error('Gemini API key is missing.');
+      }
 
-      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+      const ai = new GoogleGenAI({ apiKey });
 
       const chat = ai.chats.create({
         model: 'gemini-2.5-flash',
@@ -126,7 +135,7 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ userId }) => {
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        text: "I apologize, but I encountered a connection error. Please ensure your API key is active and try again.",
+        text: "I could not reach Gemini. Please verify VITE_GEMINI_API_KEY is set in Render and redeploy.",
         timestamp: new Date()
       };
       setMessages(prev => [...prev, errorMessage]);

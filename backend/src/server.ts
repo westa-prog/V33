@@ -115,15 +115,20 @@ app.post('/api/admin/create-user', async (req, res) => {
         if (error) throw error;
 
         const newUserId = data.user.id;
-        const { error: updateError } = await supabase.from('profiles').update({
+        const { error: profileUpsertError } = await supabase.from('profiles').upsert({
+            id: newUserId,
+            email: pseudoEmail,
+            name: normalizedUsername,
             admin_id,
             role: 'employee',
             assigned_boards: normalizedBoards,
             assigned_companies: normalizedCompanies
-        }).eq('id', newUserId);
+        }, { onConflict: 'id' });
 
-        if (updateError) {
-            console.error('[API] Failed to update profile assignments:', updateError);
+        if (profileUpsertError) {
+            console.error('[API] Failed to upsert profile assignments:', profileUpsertError);
+            res.status(500).json({ error: `User created, but profile mapping failed: ${profileUpsertError.message}` });
+            return;
         }
 
         const subject = `New Employee Account: ${normalizedUsername}`;

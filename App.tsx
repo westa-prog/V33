@@ -290,11 +290,11 @@ const App: React.FC = () => {
         if (profile) {
           setAuthUser(prev => prev ? {
             ...prev,
-            role: profile.role || prev.role,
-            adminId: profile.admin_id || prev.adminId,
-            assignedBoards: profile.assigned_boards || prev.assignedBoards,
-            assignedBoard: profile.assigned_boards?.[0] || prev.assignedBoard,
-            assignedCompanies: profile.assigned_companies || prev.assignedCompanies,
+            role: profile.role ?? prev.role,
+            adminId: profile.admin_id ?? prev.adminId,
+            assignedBoards: profile.assigned_boards ?? [],
+            assignedBoard: profile.assigned_boards && profile.assigned_boards.length > 0 ? profile.assigned_boards[0] : undefined,
+            assignedCompanies: profile.assigned_companies ?? [],
             name: profile.name || prev.name,
             email: profile.email || prev.email
           } : prev);
@@ -329,6 +329,12 @@ const App: React.FC = () => {
       unsubReplies();
     };
   }, [activeUserId, driverOwnerUserId, authUser?.email, authUser?.name, user?.accessToken, user?.email, user?.name]);
+
+  useEffect(() => {
+    if (authUser?.assignedBoard) {
+      setBoardFilter(authUser.assignedBoard);
+    }
+  }, [authUser?.assignedBoard]);
 
   // DEBUG CLI: Access via Browser Console
   useEffect(() => {
