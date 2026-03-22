@@ -519,7 +519,6 @@ const App: React.FC = () => {
 
   const handleLogout = () => {
     setAuthUser(null);
-    setUser(null);
     supabase.auth.signOut().catch((error) => console.error('Sign-out failed:', error));
     setBoardFilter('ALL');
     setCompanyFilter('ALL');
@@ -528,7 +527,6 @@ const App: React.FC = () => {
     setSearchQuery('');
     setIsLiveMode(false);
     localStorage.removeItem('auth_user');
-    localStorage.removeItem('google_user');
     localStorage.removeItem(STORAGE_KEYS.drivers);
     localStorage.removeItem(STORAGE_KEYS.emailLogs);
     localStorage.removeItem(STORAGE_KEYS.driverReplies);
