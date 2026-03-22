@@ -556,7 +556,6 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                   <select
                     value={driver.dutyStatus || DutyStatus.NOT_SET}
                     onChange={(e) => onUpdateDriver(driver.id, { dutyStatus: e.target.value as DutyStatus })}
-                    disabled={!isAdmin}
                     className={`text-sm border-none bg-transparent font-medium focus:ring-2 focus:ring-indigo-500 rounded p-1 dark:text-slate-300`}
                   >
                     {Object.values(DutyStatus).map(status => (
@@ -568,7 +567,6 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                   <select
                     value={driver.eldStatus || ELDStatus.CONNECTED}
                     onChange={(e) => onUpdateDriver(driver.id, { eldStatus: e.target.value as ELDStatus })}
-                    disabled={!isAdmin}
                     className={`text-sm rounded-lg border px-3 py-1 font-semibold ${driver.eldStatus === ELDStatus.DISCONNECTED
                       ? 'border-red-200 text-red-700 bg-red-50 dark:border-red-900 dark:text-red-400 dark:bg-red-950/30'
                       : 'border-green-200 text-green-700 bg-green-50 dark:border-green-900 dark:text-green-400 dark:bg-green-950/30'
@@ -598,7 +596,6 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                           <>
                             <button
                               disabled={isCooldowned || sendingId === driver.id}
-                              hidden={!isAdmin}
                               onClick={() => handleSendFollowUp(driver.id)}
                               className={`flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-sm active:scale-95 ${isCooldowned
                                 ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-200 dark:border-slate-700'
@@ -635,7 +632,6 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                     <select
                       value={driver.followUp}
                       onChange={(e) => onUpdateDriver(driver.id, { followUp: e.target.value as FollowUpStatus })}
-                      disabled={!isAdmin}
                       className={`text-xs font-bold px-2 py-1 rounded border ${driver.followUp === FollowUpStatus.ACTION_REQUIRED
                         ? 'bg-red-600 text-white border-red-700'
                         : driver.followUp === FollowUpStatus.CONNECT

@@ -153,6 +153,7 @@ const syncUserAccess = async (
     supabase: ReturnType<typeof getDb>,
     user: any,
     access: {
+        name?: string;
         role: string;
         admin_id?: string | null;
         assigned_boards?: string[];
@@ -163,7 +164,7 @@ const syncUserAccess = async (
     }
 ) => {
     const email = normalizeEmail(user?.email);
-    const fullName = String(user?.user_metadata?.full_name || email.split('@')[0] || 'User');
+    const fullName = String(access.name || user?.user_metadata?.full_name || email.split('@')[0] || 'User');
     const currentMeta = user?.user_metadata || {};
 
     const profileError = await upsertProfileAssignments(supabase, {
@@ -182,6 +183,7 @@ const syncUserAccess = async (
     const { error: metadataError } = await supabase.auth.admin.updateUserById(user.id, {
         user_metadata: {
             ...currentMeta,
+            full_name: fullName,
             role: access.role,
             admin_id: access.admin_id || null,
             assigned_boards: access.assigned_boards || [],
@@ -441,6 +443,7 @@ app.post('/api/admin/assign-user', async (req, res) => {
 
         if (authUser) {
             await syncUserAccess(supabase, authUser, {
+                name: normalizedName || undefined,
                 role: 'employee',
                 admin_id: normalizedAdminId,
                 assigned_boards: normalizedBoards,
@@ -593,6 +596,7 @@ app.patch('/api/admin/assignments/:assignmentId', async (req, res) => {
             }
 
             await syncUserAccess(supabase, userData.user, {
+                name: normalizedName || existing.name || undefined,
                 role: 'employee',
                 admin_id: normalizedAdminId,
                 assigned_boards: normalizedBoards,

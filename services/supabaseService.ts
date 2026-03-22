@@ -76,6 +76,16 @@ export const fetchUserProfile = async (userId: string): Promise<UserProfile | nu
     };
 };
 
+export const subscribeToUserProfile = (userId: string, callback: (profile: UserProfile | null) => void) => {
+    fetchUserProfile(userId).then(callback);
+    const channel = supabase.channel(`public:profiles:id=eq.${userId}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${userId}` }, async () => {
+            callback(await fetchUserProfile(userId));
+        })
+        .subscribe();
+    return () => supabase.removeChannel(channel);
+};
+
 export const hasImportedFromSheets = async (userId: string): Promise<boolean> => {
     const { data } = await supabase.from('profiles').select('has_imported_from_sheets').eq('id', userId).single();
     return data?.has_imported_from_sheets === true;

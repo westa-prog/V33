@@ -18,6 +18,7 @@ import {
   initializeUserDatabase,
   fetchDrivers,
   fetchUserProfile,
+  subscribeToUserProfile,
   subscribeToDrivers,
   subscribeToCompanies,
   subscribeToEmailLogs,
@@ -512,6 +513,27 @@ const App: React.FC = () => {
   }, [activeUserId, driverOwnerUserId, authUser?.email, authUser?.name, authUser?.assignedBoard, isAdminUser, user?.accessToken, user?.email, user?.name]);
 
   useEffect(() => {
+    if (!activeUserId) return;
+    const unsubProfile = subscribeToUserProfile(activeUserId, (profile) => {
+      if (!profile) return;
+      const profileBoards = normalizeBoardList(profile.assigned_boards ?? []);
+      setAuthUser(prev => prev ? {
+        ...prev,
+        role: profile.role ?? prev.role,
+        adminId: profile.admin_id ?? prev.adminId,
+        assignedBoards: profileBoards.length > 0 ? profileBoards : [],
+        assignedBoard: profileBoards.length > 0 ? normalizeBoard(profileBoards[0]) : undefined,
+        assignedCompanies: profile.assigned_companies ?? [],
+        name: profile.name || prev.name,
+        email: profile.email || prev.email
+      } : prev);
+    });
+    return () => {
+      unsubProfile();
+    };
+  }, [activeUserId]);
+
+  useEffect(() => {
     if (isAdminUser) {
       setBoardFilter('ALL');
       return;
@@ -867,7 +889,6 @@ const App: React.FC = () => {
   // This avoids immediate auto-send and keeps escalation visible in the table.
 
   const handleUpdateDriver = async (id: string, updates: Partial<Driver>) => {
-    if (!isAdminUser) return;
     let updatedDriver: Driver | undefined;
 
     setDrivers(prev => {
@@ -878,7 +899,7 @@ const App: React.FC = () => {
 
     // Persist to Supabase
     if (updatedDriver && activeUserId) {
-      await updateDriverInSupabase(activeUserId, id, updates, driverOwnerUserId);
+      await updateDriverInSupabase(activeUserId, id, updates, driverOwnerUserId || activeUserId);
     }
   };
 
