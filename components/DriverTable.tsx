@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DropdownMenu } from './ui/dropdown-menu';
+import { SelectMenu } from './ui/select-menu';
 
 interface DriverTableProps {
   drivers: Driver[]; // Original list for dropdowns
@@ -183,21 +184,6 @@ export const DriverTable: React.FC<DriverTableProps> = ({
     return fixedBoard ? [fixedBoard] : ['Board A', 'Board B', 'Board C'];
   }, [allowedBoards, fixedBoard, isAdmin]);
 
-  const sortedDrivers = useMemo(() => {
-    return [...filteredDrivers].sort((a, b) => {
-      if (a.emailSent && !b.emailSent) return -1;
-      if (!a.emailSent && b.emailSent) return 1;
-
-      if (a.emailSent && b.emailSent && a.lastEmailTime && b.lastEmailTime) {
-        const timeA = new Date(a.lastEmailTime).getTime();
-        const timeB = new Date(b.lastEmailTime).getTime();
-        return timeA - timeB;
-      }
-
-      return a.name.localeCompare(b.name);
-    });
-  }, [filteredDrivers]);
-
   const companyRows = useMemo(() => {
     return companyNames.map((name, index) => {
       const companyDrivers = drivers.filter((d) => d.company === name);
@@ -233,8 +219,28 @@ export const DriverTable: React.FC<DriverTableProps> = ({
 
   const detailDrivers = useMemo(() => {
     if (!selectedCompanyName) return [];
-    return sortedDrivers.filter((d) => d.company === selectedCompanyName);
-  }, [selectedCompanyName, sortedDrivers]);
+    return [...drivers]
+      .filter((driver) => {
+        const matchesCompany = driver.company === selectedCompanyName;
+        const matchesName = driver.name.toLowerCase().includes(filters.searchQuery.toLowerCase());
+        const matchesBoard = filters.boardFilter === 'ALL' || driver.board === filters.boardFilter;
+        const matchesEld = filters.eldFilter === 'ALL' || driver.eldStatus === filters.eldFilter;
+        const matchesDuty = filters.dutyFilter === 'ALL' || driver.dutyStatus === filters.dutyFilter;
+        return matchesCompany && matchesName && matchesBoard && matchesEld && matchesDuty;
+      })
+      .sort((a, b) => {
+        if (a.emailSent && !b.emailSent) return -1;
+        if (!a.emailSent && b.emailSent) return 1;
+
+        if (a.emailSent && b.emailSent && a.lastEmailTime && b.lastEmailTime) {
+          const timeA = new Date(a.lastEmailTime).getTime();
+          const timeB = new Date(b.lastEmailTime).getTime();
+          return timeA - timeB;
+        }
+
+        return a.name.localeCompare(b.name);
+      });
+  }, [drivers, filters.boardFilter, filters.dutyFilter, filters.eldFilter, filters.searchQuery, selectedCompanyName]);
 
   const toggleSelect = (id: string) => {
     const next = new Set(selectedIds);
@@ -346,6 +352,23 @@ export const DriverTable: React.FC<DriverTableProps> = ({
 
   const hasActiveFilters = filters.searchQuery !== '' || filters.eldFilter !== 'ALL' || filters.dutyFilter !== 'ALL' || filters.companyFilter !== 'ALL' || filters.boardFilter !== 'ALL';
   const hasDetailFilters = filters.searchQuery !== '' || filters.eldFilter !== 'ALL' || filters.dutyFilter !== 'ALL' || filters.boardFilter !== 'ALL';
+  const companyStatusOptions = [
+    { label: 'All Statuses', value: 'ALL' },
+    { label: 'Active', value: 'ACTIVE' },
+    { label: 'Needs Attention', value: 'ATTENTION' },
+    { label: 'Inactive', value: 'INACTIVE' }
+  ];
+  const boardFilterOptions = [{ label: 'All Boards', value: 'ALL' }, ...boards.map((b) => ({ label: b, value: b }))];
+  const eldFilterOptions = [
+    { label: 'All Connections', value: 'ALL' },
+    { label: 'Connected', value: ELDStatus.CONNECTED },
+    { label: 'Disconnected', value: ELDStatus.DISCONNECTED }
+  ];
+  const dutyFilterOptions = [
+    { label: 'All Duty Status', value: 'ALL' },
+    ...Object.values(DutyStatus).map((status) => ({ label: status, value: status }))
+  ];
+  const followUpOptions = Object.values(FollowUpStatus).map((status) => ({ label: status, value: status }));
 
   useEffect(() => {
     setSelectedIds(new Set());
@@ -391,23 +414,18 @@ export const DriverTable: React.FC<DriverTableProps> = ({
               />
             </div>
 
-            <select
+            <SelectMenu
               value={companyStatusFilter}
-              onChange={(e) => setCompanyStatusFilter(e.target.value as 'ALL' | 'ACTIVE' | 'ATTENTION' | 'INACTIVE')}
-              className="text-sm border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 dark:text-slate-300 px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm font-medium"
-            >
-              <option value="ALL">All Statuses</option>
-              <option value="ACTIVE">Active</option>
-              <option value="ATTENTION">Needs Attention</option>
-              <option value="INACTIVE">Inactive</option>
-            </select>
+              onChange={(value) => setCompanyStatusFilter(value as 'ALL' | 'ACTIVE' | 'ATTENTION' | 'INACTIVE')}
+              options={companyStatusOptions}
+              triggerClassName="min-w-[170px] justify-between"
+            />
           </>
         ) : (
           <>
             <button
               onClick={() => {
                 setSelectedCompanyName(null);
-                setFilters.setCompanyFilter('ALL');
                 setFilters.setSearchQuery('');
                 setFilters.setEldFilter('ALL');
                 setFilters.setDutyFilter('ALL');
@@ -433,35 +451,26 @@ export const DriverTable: React.FC<DriverTableProps> = ({
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">
-              <select
+              <SelectMenu
                 value={filters.boardFilter}
-                onChange={(e) => setFilters.setBoardFilter(e.target.value)}
-                className="text-sm border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 dark:text-slate-300 px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm font-medium"
-              >
-                <option value="ALL">All Boards</option>
-                {boards.map(b => <option key={b} value={b}>{b}</option>)}
-              </select>
+                onChange={setFilters.setBoardFilter}
+                options={boardFilterOptions}
+                triggerClassName="min-w-[132px] justify-between"
+              />
 
-              <select
+              <SelectMenu
                 value={filters.eldFilter}
-                onChange={(e) => setFilters.setEldFilter(e.target.value as ELDStatus | 'ALL')}
-                className="text-sm border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 dark:text-slate-300 px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm font-medium"
-              >
-                <option value="ALL">All Connections</option>
-                <option value={ELDStatus.CONNECTED}>Connected</option>
-                <option value={ELDStatus.DISCONNECTED}>Disconnected</option>
-              </select>
+                onChange={(value) => setFilters.setEldFilter(value as ELDStatus | 'ALL')}
+                options={eldFilterOptions}
+                triggerClassName="min-w-[150px] justify-between"
+              />
 
-              <select
+              <SelectMenu
                 value={filters.dutyFilter}
-                onChange={(e) => setFilters.setDutyFilter(e.target.value as DutyStatus | 'ALL')}
-                className="text-sm border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 dark:text-slate-300 px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm font-medium"
-              >
-                <option value="ALL">All Duty Status</option>
-                {Object.values(DutyStatus).map(status => (
-                  <option key={status} value={status}>{status}</option>
-                ))}
-              </select>
+                onChange={(value) => setFilters.setDutyFilter(value as DutyStatus | 'ALL')}
+                options={dutyFilterOptions}
+                triggerClassName="min-w-[150px] justify-between"
+              />
             </div>
 
             {hasDetailFilters && (
@@ -516,7 +525,6 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                         type="button"
                         onClick={() => {
                           setSelectedCompanyName(company.name);
-                          setFilters.setCompanyFilter(company.name);
                           setFilters.setSearchQuery('');
                           setFilters.setEldFilter('ALL');
                           setFilters.setDutyFilter('ALL');
@@ -662,17 +670,13 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   {isAdmin ? (
-                    <select
+                    <SelectMenu
                       value={driver.board}
-                      onChange={(e) => onUpdateDriver(driver.id, { board: e.target.value })}
-                      className="text-[10px] font-black text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/30 px-2 py-0.5 rounded uppercase border border-indigo-100 dark:border-indigo-800 outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
-                    >
-                      {boards.map(b => (
-                        <option key={b} value={b} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
-                          {b}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(value) => onUpdateDriver(driver.id, { board: value })}
+                      options={boards.map((b) => ({ label: b, value: b }))}
+                      triggerClassName="h-7 rounded-md border-indigo-500/20 bg-indigo-500/15 px-2 py-0.5 text-[10px] font-black uppercase text-indigo-200"
+                      menuClassName="min-w-[140px]"
+                    />
                   ) : (
                     <span className="text-[10px] font-black text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/30 px-2 py-0.5 rounded uppercase border border-indigo-100 dark:border-indigo-800">
                       {driver.board}
@@ -685,28 +689,26 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                   </span>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <select
+                  <SelectMenu
                     value={driver.dutyStatus || DutyStatus.NOT_SET}
-                    onChange={(e) => onUpdateDriver(driver.id, { dutyStatus: e.target.value as DutyStatus })}
-                    className={`text-sm border-none bg-transparent font-medium focus:ring-2 focus:ring-indigo-500 rounded p-1 dark:text-slate-300`}
-                  >
-                    {Object.values(DutyStatus).map(status => (
-                      <option key={status} value={status}>{status}</option>
-                    ))}
-                  </select>
+                    onChange={(value) => onUpdateDriver(driver.id, { dutyStatus: value as DutyStatus })}
+                    options={Object.values(DutyStatus).map((status) => ({ label: status, value: status }))}
+                    triggerClassName="min-w-[120px] justify-between border border-white/5 bg-white/0 px-2 py-1 text-sm font-medium text-slate-200 shadow-none hover:bg-white/5"
+                    menuClassName="min-w-[170px]"
+                  />
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <select
+                  <SelectMenu
                     value={driver.eldStatus || ELDStatus.CONNECTED}
-                    onChange={(e) => onUpdateDriver(driver.id, { eldStatus: e.target.value as ELDStatus })}
-                    className={`text-sm rounded-lg border px-3 py-1 font-semibold ${driver.eldStatus === ELDStatus.DISCONNECTED
-                      ? 'border-red-200 text-red-700 bg-red-50 dark:border-red-900 dark:text-red-400 dark:bg-red-950/30'
-                      : 'border-green-200 text-green-700 bg-green-50 dark:border-green-900 dark:text-green-400 dark:bg-green-950/30'
-                      }`}
-                  >
-                    <option value={ELDStatus.CONNECTED}>Connected</option>
-                    <option value={ELDStatus.DISCONNECTED}>Disconnected</option>
-                  </select>
+                    onChange={(value) => onUpdateDriver(driver.id, { eldStatus: value as ELDStatus })}
+                    options={eldFilterOptions.filter((option) => option.value !== 'ALL')}
+                    triggerClassName={`min-w-[110px] justify-between rounded-lg px-3 py-1 text-sm font-semibold ${
+                      driver.eldStatus === ELDStatus.DISCONNECTED
+                        ? 'border border-red-500/30 bg-red-500/15 text-red-300'
+                        : 'border border-emerald-500/30 bg-emerald-500/15 text-emerald-300'
+                    }`}
+                    menuClassName="min-w-[150px]"
+                  />
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   {driver.eldStatus === ELDStatus.DISCONNECTED && (driver.dutyStatus === DutyStatus.DRIVING || driver.dutyStatus === DutyStatus.ON_DUTY) ? (
@@ -761,20 +763,19 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                       })()}
                     </div>
                   ) : (
-                    <select
+                    <SelectMenu
                       value={driver.followUp}
-                      onChange={(e) => onUpdateDriver(driver.id, { followUp: e.target.value as FollowUpStatus })}
-                      className={`text-xs font-bold px-2 py-1 rounded border ${driver.followUp === FollowUpStatus.ACTION_REQUIRED
-                        ? 'bg-red-600 text-white border-red-700'
-                        : driver.followUp === FollowUpStatus.CONNECT
-                          ? 'bg-blue-600 text-white border-blue-700'
-                          : 'bg-white dark:bg-slate-800 text-slate-400 dark:text-slate-500 border-slate-200 dark:border-slate-700'
-                        }`}
-                    >
-                      <option value={FollowUpStatus.NONE}>None</option>
-                      <option value={FollowUpStatus.ACTION_REQUIRED}>Action required</option>
-                      <option value={FollowUpStatus.CONNECT}>Connect</option>
-                    </select>
+                      onChange={(value) => onUpdateDriver(driver.id, { followUp: value as FollowUpStatus })}
+                      options={followUpOptions}
+                      triggerClassName={`min-w-[100px] justify-between px-2 py-1 text-xs font-bold ${
+                        driver.followUp === FollowUpStatus.ACTION_REQUIRED
+                          ? 'border border-red-500/30 bg-red-500/80 text-white'
+                          : driver.followUp === FollowUpStatus.CONNECT
+                            ? 'border border-blue-500/30 bg-blue-500/80 text-white'
+                            : 'border border-slate-700 bg-slate-800 text-slate-300'
+                      }`}
+                      menuClassName="min-w-[170px]"
+                    />
                   )}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
