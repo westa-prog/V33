@@ -18,6 +18,7 @@ Run migrations in order:
 3. `supabase/migrations/0003_tenant_rls_hardening.sql`
 4. `supabase/migrations/0004_normalized_board_company_model.sql`
 5. `supabase/migrations/0005_drivers_new_compat_columns.sql`
+6. `supabase/migrations/0006_board_id_schema_safety.sql`
 
 Verify tables exist:
 

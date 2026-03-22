@@ -257,8 +257,9 @@ app.get('/api/admin/users', async (req, res) => {
                     name: row.name,
                     role: row.role,
                     created_at: row.created_at,
-                    assigned_boards: pickAssignedBoards(row).length > 0 ? pickAssignedBoards(row) : meta.assigned_boards,
-                    assigned_companies: pickAssignedCompanies(row).length > 0 ? pickAssignedCompanies(row) : meta.assigned_companies,
+                    // Metadata is the source of truth in mixed legacy schemas.
+                    assigned_boards: meta.assigned_boards.length > 0 ? meta.assigned_boards : pickAssignedBoards(row),
+                    assigned_companies: meta.assigned_companies.length > 0 ? meta.assigned_companies : pickAssignedCompanies(row),
                     landing_html: userData?.user?.user_metadata?.landing_html || '',
                     email_template: userData?.user?.user_metadata?.email_template || '',
                     email_templates: userData?.user?.user_metadata?.email_templates || {}
