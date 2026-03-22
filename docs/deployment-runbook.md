@@ -144,6 +144,25 @@ Recommended quick checks:
 4. Open AI Assistant and confirm message history persists after refresh.
 5. Log out and log back in to confirm profile/filters remain correct.
 
+## 8) Realtime Checklist
+
+To get instant admin/user updates without refresh:
+
+1. In Supabase Dashboard, open `Database -> Replication`.
+2. Ensure realtime replication is enabled for:
+   - `public.drivers`
+   - (optional for future normalized model) `public.drivers_new`
+3. Keep RLS policies enabled and valid; realtime respects RLS visibility.
+4. Verify in-app behavior:
+   - create/update/delete a driver in one session
+   - confirm change appears in another session within seconds
+
+Implementation note:
+
+- Frontend uses hybrid realtime handling:
+  - instant optimistic patch from realtime payload
+  - then full `fetchDrivers()` reconciliation for consistency
+
 ## 7) Rollback Notes
 
 - If deploy breaks at runtime, rollback to previous Render deploy.

@@ -242,12 +242,38 @@ export const addDriverReply = async (userId: string, reply: DriverReply) => {
  */
 export const subscribeToDrivers = (ownerUserId: string, callback: (drivers: Driver[]) => void) => {
     // First, fetch initial list
-    fetchDrivers(ownerUserId).then(callback);
+    let currentDrivers: Driver[] = [];
+    fetchDrivers(ownerUserId).then((rows) => {
+        currentDrivers = rows;
+        callback(rows);
+    });
 
     const channel = supabase.channel(`public:drivers:user_id=eq.${ownerUserId}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'drivers', filter: `user_id=eq.${ownerUserId}` }, async () => {
-            const updated = await fetchDrivers(ownerUserId);
-            callback(updated);
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'drivers', filter: `user_id=eq.${ownerUserId}` }, async (payload: any) => {
+            // Optimistic real-time state patch for instant UI updates.
+            try {
+                if (payload?.eventType === 'INSERT' && payload?.new) {
+                    const inserted = mapDbToDriver(payload.new);
+                    const withoutDup = currentDrivers.filter((d) => d.id !== inserted.id);
+                    currentDrivers = [inserted, ...withoutDup];
+                    callback(currentDrivers);
+                } else if (payload?.eventType === 'UPDATE' && payload?.new) {
+                    const updatedRow = mapDbToDriver(payload.new);
+                    currentDrivers = currentDrivers.map((d) => d.id === updatedRow.id ? updatedRow : d);
+                    callback(currentDrivers);
+                } else if (payload?.eventType === 'DELETE' && payload?.old) {
+                    const deletedId = payload.old.id as string;
+                    currentDrivers = currentDrivers.filter((d) => d.id !== deletedId);
+                    callback(currentDrivers);
+                }
+            } catch (error) {
+                console.warn('[REALTIME] Driver optimistic patch failed, falling back to fetch.', error);
+            }
+
+            // Hybrid consistency refresh: always reconcile with DB snapshot.
+            const refreshed = await fetchDrivers(ownerUserId);
+            currentDrivers = refreshed;
+            callback(refreshed);
         })
         .subscribe();
 
