@@ -349,14 +349,6 @@ const App: React.FC = () => {
     return data?.driver || null;
   }, [activeUserId, apiBaseUrl, drivers]);
 
-  const refreshDriversFromBackend = useCallback(async () => {
-    if (!driverScopeId) return [] as Driver[];
-    const refreshed = await fetchDrivers(driverScopeId);
-    setDrivers(refreshed);
-    setLastSync(new Date().toISOString());
-    return refreshed;
-  }, [driverScopeId]);
-
   const persistDriverReset = useCallback(async (driverIds: string[]) => {
     if (!activeUserId || driverIds.length === 0) return [] as Driver[];
 
@@ -1128,7 +1120,6 @@ const App: React.FC = () => {
         if (persistedDriver) {
           setDrivers(prev => prev.map(d => d.id === id ? { ...d, ...persistedDriver } : d));
         }
-        await refreshDriversFromBackend();
       } catch (error: any) {
         if (previousDriver) {
           setDrivers(prev => prev.map(d => d.id === id ? previousDriver! : d));
@@ -1137,7 +1128,7 @@ const App: React.FC = () => {
         throw error;
       }
     }
-  }, [activeUserId, persistDriverUpdate, refreshDriversFromBackend]);
+  }, [activeUserId, persistDriverUpdate]);
 
   const handleAddDriver = async (data: Omit<Driver, 'id' | 'emailSent'>) => {
     if (!activeUserId) return;
