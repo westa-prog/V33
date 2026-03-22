@@ -17,6 +17,7 @@ import { generateComplianceEmail, generateDriverReply } from './services/geminiS
 import {
   initializeUserDatabase,
   fetchDrivers,
+  fetchCompanies,
   fetchUserProfile,
   subscribeToUserProfile,
   subscribeToDrivers,
@@ -518,6 +519,35 @@ const App: React.FC = () => {
       return;
     }
 
+    let isDisposed = false;
+    const driverScopeId = driverOwnerUserId || activeUserId;
+    const ownBoardId = !isAdminUser && allowedBoards.length === 1
+      ? normalizeBoard(allowedBoards[0]).replace('Board ', '')
+      : undefined;
+
+    const reconcileDrivers = async () => {
+      try {
+        const refreshed = await fetchDrivers(driverScopeId);
+        if (!isDisposed) {
+          setDrivers(refreshed);
+          setLastSync(new Date().toISOString());
+        }
+      } catch (error) {
+        console.warn('Driver reconciliation refresh failed:', error);
+      }
+    };
+
+    const reconcileCompanies = async () => {
+      try {
+        const refreshed = await fetchCompanies(isAdminUser ? undefined : ownBoardId);
+        if (!isDisposed) {
+          setCompanies(refreshed);
+        }
+      } catch (error) {
+        console.warn('Company reconciliation refresh failed:', error);
+      }
+    };
+
     const setupDatabase = async () => {
       try {
         const activeEmail = user?.email || authUser?.email || '';
@@ -555,7 +585,7 @@ const App: React.FC = () => {
         }
 
         setDbConnected(true);
-        const refreshed = await fetchDrivers(driverOwnerUserId || activeUserId);
+        const refreshed = await fetchDrivers(driverScopeId);
         setDrivers(refreshed);
         console.log('Database connected for user:', activeEmail);
       } catch (err) {
@@ -567,7 +597,7 @@ const App: React.FC = () => {
     setupDatabase();
 
     const unsubDrivers = subscribeToDrivers(
-      driverOwnerUserId || activeUserId,
+      driverScopeId,
       (driversSnapshot) => {
         setDrivers(driversSnapshot);
         setLastSync(new Date().toISOString());
@@ -601,26 +631,48 @@ const App: React.FC = () => {
       }
     );
 
-    const ownBoardId = !isAdminUser && allowedBoards.length === 1
-      ? normalizeBoard(allowedBoards[0]).replace('Board ', '')
-      : undefined;
     const unsubCompanies = subscribeToCompanies((companySnapshot) => {
       setCompanies(companySnapshot);
     }, isAdminUser ? undefined : ownBoardId);
 
-    const unsubLogs = subscribeToEmailLogs(driverOwnerUserId || activeUserId, (emailLogSnapshot) => {
+    const unsubLogs = subscribeToEmailLogs(driverScopeId, (emailLogSnapshot) => {
       setEmailLogs(emailLogSnapshot);
     });
 
-    const unsubReplies = subscribeToDriverReplies(driverOwnerUserId || activeUserId, (driverReplySnapshot) => {
+    const unsubReplies = subscribeToDriverReplies(driverScopeId, (driverReplySnapshot) => {
       setDriverReplies(driverReplySnapshot);
     });
 
+    const refreshOnVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        reconcileDrivers().catch(() => undefined);
+        reconcileCompanies().catch(() => undefined);
+      }
+    };
+
+    const refreshOnFocus = () => {
+      reconcileDrivers().catch(() => undefined);
+      reconcileCompanies().catch(() => undefined);
+    };
+
+    const refreshInterval = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        reconcileDrivers().catch(() => undefined);
+      }
+    }, 10000);
+
+    window.addEventListener('focus', refreshOnFocus);
+    document.addEventListener('visibilitychange', refreshOnVisibility);
+
     return () => {
+      isDisposed = true;
       unsubDrivers();
       unsubCompanies();
       unsubLogs();
       unsubReplies();
+      window.clearInterval(refreshInterval);
+      window.removeEventListener('focus', refreshOnFocus);
+      document.removeEventListener('visibilitychange', refreshOnVisibility);
     };
   }, [activeUserId, driverOwnerUserId, authUser?.email, authUser?.name, allowedBoards.join('|'), isAdminUser, syncAuthMetadataFromCurrentUser, user?.accessToken, user?.email, user?.name]);
 
