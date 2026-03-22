@@ -36,6 +36,24 @@ const normalizeList = (value: unknown): string[] => {
         .map((item) => typeof item === 'string' ? item.trim() : '')
         .filter(Boolean);
 };
+const pickAssignedBoards = (profile: any): string[] => {
+    if (Array.isArray(profile?.assigned_boards)) {
+        return normalizeList(profile.assigned_boards);
+    }
+    if (typeof profile?.assigned_board === 'string' && profile.assigned_board.trim()) {
+        return [profile.assigned_board.trim()];
+    }
+    return [];
+};
+const pickAssignedCompanies = (profile: any): string[] => {
+    if (Array.isArray(profile?.assigned_companies)) {
+        return normalizeList(profile.assigned_companies);
+    }
+    if (typeof profile?.assigned_company === 'string' && profile.assigned_company.trim()) {
+        return [profile.assigned_company.trim()];
+    }
+    return [];
+};
 
 const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
@@ -115,7 +133,7 @@ app.post('/api/admin/create-user', async (req, res) => {
         if (error) throw error;
 
         const newUserId = data.user.id;
-        const { error: profileUpsertError } = await supabase.from('profiles').upsert({
+        let { error: profileUpsertError } = await supabase.from('profiles').upsert({
             id: newUserId,
             email: pseudoEmail,
             name: normalizedUsername,
@@ -124,6 +142,22 @@ app.post('/api/admin/create-user', async (req, res) => {
             assigned_boards: normalizedBoards,
             assigned_companies: normalizedCompanies
         }, { onConflict: 'id' });
+
+        if (profileUpsertError && /assigned_boards|assigned_companies/i.test(String(profileUpsertError.message || ''))) {
+            const legacyPayload: any = {
+                id: newUserId,
+                email: pseudoEmail,
+                name: normalizedUsername,
+                admin_id,
+                role: 'employee',
+                assigned_board: normalizedBoards[0] || null
+            };
+            if (normalizedCompanies.length > 0) {
+                legacyPayload.assigned_company = normalizedCompanies[0];
+            }
+            const legacyRes = await supabase.from('profiles').upsert(legacyPayload, { onConflict: 'id' });
+            profileUpsertError = legacyRes.error || null;
+        }
 
         if (profileUpsertError) {
             console.error('[API] Failed to upsert profile assignments:', profileUpsertError);
@@ -172,7 +206,7 @@ app.get('/api/admin/users', async (req, res) => {
         const supabase = getDb();
         const { data, error } = await supabase
             .from('profiles')
-            .select('id, email, name, role, assigned_boards, assigned_companies, created_at')
+            .select('*')
             .eq('admin_id', adminId)
             .order('created_at', { ascending: false });
 
@@ -181,7 +215,16 @@ app.get('/api/admin/users', async (req, res) => {
             return;
         }
 
-        res.json({ success: true, users: data || [] });
+        const mapped = (data || []).map((row: any) => ({
+            id: row.id,
+            email: row.email,
+            name: row.name,
+            role: row.role,
+            created_at: row.created_at,
+            assigned_boards: pickAssignedBoards(row),
+            assigned_companies: pickAssignedCompanies(row)
+        }));
+        res.json({ success: true, users: mapped });
     } catch (e: any) {
         console.error('[API] Admin list-users failed:', e);
         res.status(500).json({ error: e.message || 'Failed to load users.' });
@@ -213,7 +256,7 @@ app.patch('/api/admin/users/:userId', async (req, res) => {
         const supabase = getDb();
         const { data: targetProfile, error: targetError } = await supabase
             .from('profiles')
-            .select('id, admin_id')
+            .select('*')
             .eq('id', userId)
             .single();
 
@@ -226,13 +269,27 @@ app.patch('/api/admin/users/:userId', async (req, res) => {
             return;
         }
 
-        const { error: profileUpdateError } = await supabase
+        let { error: profileUpdateError } = await supabase
             .from('profiles')
             .update({
                 assigned_boards: normalizedBoards,
                 assigned_companies: normalizedCompanies
             })
             .eq('id', userId);
+
+        if (profileUpdateError && /assigned_boards|assigned_companies/i.test(String(profileUpdateError.message || ''))) {
+            const legacyUpdate: any = {
+                assigned_board: normalizedBoards[0] || null
+            };
+            if (normalizedCompanies.length > 0) {
+                legacyUpdate.assigned_company = normalizedCompanies[0];
+            }
+            const legacyRes = await supabase
+                .from('profiles')
+                .update(legacyUpdate)
+                .eq('id', userId);
+            profileUpdateError = legacyRes.error || null;
+        }
 
         if (profileUpdateError) {
             res.status(500).json({ error: profileUpdateError.message });
@@ -278,9 +335,9 @@ app.post('/api/admin/repair-users', async (req, res) => {
         const supabase = getDb();
         const { data: candidates, error: candidateError } = await supabase
             .from('profiles')
-            .select('id, email, role, admin_id, assigned_boards')
+            .select('*')
             .ilike('email', '%@v33.local')
-            .or('admin_id.is.null,assigned_boards.is.null,role.is.null');
+            .or('admin_id.is.null,role.is.null');
 
         if (candidateError) {
             res.status(500).json({ error: candidateError.message });
@@ -292,13 +349,13 @@ app.post('/api/admin/repair-users', async (req, res) => {
         const repairedIds: string[] = [];
 
         for (const row of list) {
-            const currentBoards = Array.isArray(row.assigned_boards) ? row.assigned_boards.filter(Boolean) : [];
+            const currentBoards = pickAssignedBoards(row);
             const needsAdmin = !row.admin_id;
             const needsRole = !row.role || row.role !== 'employee';
             const needsBoards = currentBoards.length === 0;
             if (!needsAdmin && !needsRole && !needsBoards) continue;
 
-            const { error: updateError } = await supabase
+            let { error: updateError } = await supabase
                 .from('profiles')
                 .update({
                     admin_id: row.admin_id || normalizedAdminId,
@@ -306,6 +363,18 @@ app.post('/api/admin/repair-users', async (req, res) => {
                     assigned_boards: needsBoards ? normalizedBoards : currentBoards
                 })
                 .eq('id', row.id);
+
+            if (updateError && /assigned_boards/i.test(String(updateError.message || ''))) {
+                const legacyRes = await supabase
+                    .from('profiles')
+                    .update({
+                        admin_id: row.admin_id || normalizedAdminId,
+                        role: 'employee',
+                        assigned_board: (needsBoards ? normalizedBoards : currentBoards)[0] || null
+                    })
+                    .eq('id', row.id);
+                updateError = legacyRes.error || null;
+            }
 
             if (!updateError) {
                 repaired += 1;
@@ -357,7 +426,7 @@ app.post('/api/drivers/create', async (req, res) => {
         const supabase = getDb();
         const { data: profile, error: profileError } = await supabase
             .from('profiles')
-            .select('id, email, name, role, admin_id, assigned_boards, assigned_companies')
+            .select('*')
             .eq('id', normalizedActingUserId)
             .single();
 
@@ -373,8 +442,8 @@ app.post('/api/drivers/create', async (req, res) => {
             return;
         }
 
-        const assignedBoards = Array.isArray(profile.assigned_boards) ? profile.assigned_boards.filter(Boolean) : [];
-        const assignedCompanies = Array.isArray(profile.assigned_companies) ? profile.assigned_companies.filter(Boolean) : [];
+        const assignedBoards = pickAssignedBoards(profile);
+        const assignedCompanies = pickAssignedCompanies(profile);
 
         let effectiveBoard = normalizedBoardInput || 'Board A';
         if (isAdmin) {

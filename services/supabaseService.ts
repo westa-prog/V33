@@ -24,7 +24,7 @@ export const initializeUserDatabase = async (userId: string, userEmail: string, 
 export const fetchUserProfile = async (userId: string): Promise<UserProfile | null> => {
     const { data, error } = await supabase
         .from('profiles')
-        .select('id, email, name, role, admin_id, assigned_boards, assigned_companies')
+        .select('*')
         .eq('id', userId)
         .single();
 
@@ -32,7 +32,23 @@ export const fetchUserProfile = async (userId: string): Promise<UserProfile | nu
         return null;
     }
 
-    return data as UserProfile;
+    const row: any = data || {};
+    const boards = Array.isArray(row.assigned_boards)
+        ? row.assigned_boards
+        : (typeof row.assigned_board === 'string' && row.assigned_board ? [row.assigned_board] : []);
+    const companies = Array.isArray(row.assigned_companies)
+        ? row.assigned_companies
+        : (typeof row.assigned_company === 'string' && row.assigned_company ? [row.assigned_company] : []);
+
+    return {
+        id: row.id,
+        email: row.email,
+        name: row.name,
+        role: row.role,
+        admin_id: row.admin_id,
+        assigned_boards: boards,
+        assigned_companies: companies
+    } as UserProfile;
 };
 
 /**
