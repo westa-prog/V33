@@ -81,6 +81,8 @@ export interface AuthUser {
   role?: string;
   adminId?: string;
   assignedCompanies?: string[];
+  landingHtml?: string;
+  emailTemplate?: string;
 }
 
 export interface SheetConfig {

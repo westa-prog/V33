@@ -13,6 +13,7 @@ import { Dashboard } from './components/Dashboard';
 import { CustomEmail } from './components/CustomEmail';
 import { EmailBroadcast } from './components/EmailBroadcast';
 import { AdminPanel } from './components/AdminPanel';
+import { SettingsPanel } from './components/SettingsPanel';
 import { generateComplianceEmail, generateDriverReply } from './services/geminiService';
 import {
   initializeUserDatabase,
@@ -229,7 +230,9 @@ const App: React.FC = () => {
         ...prev,
         uid: sessionUser.id,
         email: sessionUser.email || prev?.email || '',
-        name: (sessionUser.user_metadata?.full_name as string) || prev?.name || sessionUser.email?.split('@')[0] || 'User'
+        name: (sessionUser.user_metadata?.full_name as string) || prev?.name || sessionUser.email?.split('@')[0] || 'User',
+        landingHtml: (sessionUser.user_metadata?.landing_html as string) || prev?.landingHtml,
+        emailTemplate: (sessionUser.user_metadata?.email_template as string) || prev?.emailTemplate
       }));
     };
 
@@ -246,7 +249,9 @@ const App: React.FC = () => {
         ...prev,
         uid: sessionUser.id,
         email: sessionUser.email || prev?.email || '',
-        name: (sessionUser.user_metadata?.full_name as string) || prev?.name || sessionUser.email?.split('@')[0] || 'User'
+        name: (sessionUser.user_metadata?.full_name as string) || prev?.name || sessionUser.email?.split('@')[0] || 'User',
+        landingHtml: (sessionUser.user_metadata?.landing_html as string) || prev?.landingHtml,
+        emailTemplate: (sessionUser.user_metadata?.email_template as string) || prev?.emailTemplate
       }));
     });
 
@@ -462,6 +467,13 @@ const App: React.FC = () => {
     }
 
     const { subject, body } = buildFollowUpEmail(driver.name);
+    const templatedBody = authUser?.emailTemplate
+      ? authUser.emailTemplate
+          .replace(/{{\s*driver_name\s*}}/gi, driver.name)
+          .replace(/{{\s*driver_email\s*}}/gi, driver.email || '')
+          .replace(/{{\s*company\s*}}/gi, driver.company || '')
+          .replace(/{{\s*board\s*}}/gi, driver.board || '')
+      : body;
     let sentSuccess = true;
     let sentVia: 'Simulation' | 'Gmail API' = 'Simulation';
 
@@ -469,7 +481,7 @@ const App: React.FC = () => {
 
     if (isLiveMode && user?.accessToken && user.accessToken !== 'demo_token') {
       console.log("Triggering Gmail API message to:", driver.email);
-      const res = await sendGmailMessage(user.accessToken, driver.email, subject, body);
+      const res = await sendGmailMessage(user.accessToken, driver.email, subject, templatedBody);
       sentSuccess = res.ok;
       sentVia = 'Gmail API';
       if (!sentSuccess) throw new Error(res.error || "Gmail API failed to send message.");
@@ -486,7 +498,7 @@ const App: React.FC = () => {
       driverName: driver.name,
       timestamp: sentAt,
       statusAtTime: driver.dutyStatus,
-      content: body,
+      content: templatedBody,
       sentVia
     };
 
@@ -800,7 +812,7 @@ const App: React.FC = () => {
           )}
         </header>
 
-        {activeTab === 'Dashboard' && <Dashboard drivers={filteredDrivers} assignedBoard={authUser?.assignedBoard} />}
+        {activeTab === 'Dashboard' && <Dashboard drivers={filteredDrivers} assignedBoard={authUser?.assignedBoard} landingHtml={authUser?.landingHtml} />}
 
         {activeTab === 'Connection' && (
           <div className="space-y-8">
@@ -861,6 +873,15 @@ const App: React.FC = () => {
           </div>
         )}
         {activeTab === 'Admin Panel' && <AdminPanel currentUser={authUser} />}
+        {activeTab === 'Settings' && (
+          <SettingsPanel
+            currentUser={authUser}
+            isAdmin={isAdminUser}
+            theme={theme}
+            setTheme={setTheme}
+            emailLogs={emailLogs}
+          />
+        )}
       </main>
      </div>
     </div>

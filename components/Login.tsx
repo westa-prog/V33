@@ -48,7 +48,9 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
         onLogin({
           uid: signedInUser.id,
           email: signedInUser.email || email,
-          name: (signedInUser.user_metadata?.full_name as string) || name || email.split('@')[0]
+          name: (signedInUser.user_metadata?.full_name as string) || name || email.split('@')[0],
+          landingHtml: (signedInUser.user_metadata?.landing_html as string) || '',
+          emailTemplate: (signedInUser.user_metadata?.email_template as string) || ''
         });
         return;
       }
@@ -62,7 +64,9 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
       onLogin({
         uid: signedInUser.id,
         email: signedInUser.email || email,
-        name: (signedInUser.user_metadata?.full_name as string) || email.split('@')[0]
+        name: (signedInUser.user_metadata?.full_name as string) || email.split('@')[0],
+        landingHtml: (signedInUser.user_metadata?.landing_html as string) || '',
+        emailTemplate: (signedInUser.user_metadata?.email_template as string) || ''
       });
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Authentication failed.');

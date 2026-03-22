@@ -9,9 +9,22 @@ import { Map, MapControls } from './ui/map';
 interface DashboardProps {
     drivers: Driver[];
     assignedBoard?: string;
+    landingHtml?: string;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, landingHtml }) => {
+    if (landingHtml && landingHtml.trim()) {
+        return (
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
+                <iframe
+                    title="Personalized Landing"
+                    srcDoc={landingHtml}
+                    className="w-full min-h-[80vh] bg-white"
+                    sandbox="allow-same-origin allow-popups allow-forms allow-scripts"
+                />
+            </div>
+        );
+    }
     const rawApiBaseUrl = ((import.meta as any).env.VITE_API_URL || '').trim();
     const apiBaseUrl = rawApiBaseUrl.replace(/\/+$/, '');
     const isBrowser = typeof window !== 'undefined';

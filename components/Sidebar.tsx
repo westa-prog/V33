@@ -6,7 +6,8 @@ import {
   Sparkles, 
   TrendingUp, 
   Mail,
-  UserPlus
+  UserPlus,
+  Settings
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -18,6 +19,7 @@ export const menuItems = [
   { icon: TrendingUp, label: "Activity", id: 'Activity', color: "text-emerald-500", adminOnly: true },
   { icon: TrendingUp, label: "History", id: 'History', color: "text-red-500" },
   { icon: Mail, label: "Broadcast", id: 'Broadcast', color: "text-rose-500" },
+  { icon: Settings, label: "Settings", id: 'Settings', color: "text-slate-500" },
   { icon: UserPlus, label: "Admin Panel", id: 'Admin Panel', color: "text-indigo-500", adminOnly: true }
 ];
 

@@ -235,15 +235,22 @@ app.get('/api/admin/users', async (req, res) => {
             .order('created_at', { ascending: false });
 
         if (!error) {
-            const mapped = (data || []).map((row: any) => ({
-                id: row.id,
-                email: row.email,
-                name: row.name,
-                role: row.role,
-                created_at: row.created_at,
-                assigned_boards: pickAssignedBoards(row),
-                assigned_companies: pickAssignedCompanies(row)
-            }));
+            const mapped: any[] = [];
+            for (const row of (data || [])) {
+                const { data: userData } = await supabase.auth.admin.getUserById(row.id);
+                const meta = readUserMetadata(userData?.user);
+                mapped.push({
+                    id: row.id,
+                    email: row.email,
+                    name: row.name,
+                    role: row.role,
+                    created_at: row.created_at,
+                    assigned_boards: pickAssignedBoards(row).length > 0 ? pickAssignedBoards(row) : meta.assigned_boards,
+                    assigned_companies: pickAssignedCompanies(row).length > 0 ? pickAssignedCompanies(row) : meta.assigned_companies,
+                    landing_html: userData?.user?.user_metadata?.landing_html || '',
+                    email_template: userData?.user?.user_metadata?.email_template || ''
+                });
+            }
             res.json({ success: true, users: mapped });
             return;
         }
@@ -272,7 +279,9 @@ app.get('/api/admin/users', async (req, res) => {
                         role: meta.role || 'employee',
                         created_at: u.created_at,
                         assigned_boards: meta.assigned_boards,
-                        assigned_companies: meta.assigned_companies
+                        assigned_companies: meta.assigned_companies,
+                        landing_html: u.user_metadata?.landing_html || '',
+                        email_template: u.user_metadata?.email_template || ''
                     });
                 }
             }
@@ -289,7 +298,7 @@ app.get('/api/admin/users', async (req, res) => {
 app.patch('/api/admin/users/:userId', async (req, res) => {
     try {
         const userId = String(req.params.userId || '').trim();
-        const { admin_id, assigned_boards, assigned_companies, password } = req.body || {};
+        const { admin_id, assigned_boards, assigned_companies, password, landing_html, email_template } = req.body || {};
         const normalizedAdminId = String(admin_id || '').trim();
 
         if (!isUuid(userId) || !isUuid(normalizedAdminId)) {
@@ -376,7 +385,9 @@ app.patch('/api/admin/users/:userId', async (req, res) => {
                 role: 'employee',
                 admin_id: normalizedAdminId,
                 assigned_boards: normalizedBoards,
-                assigned_companies: normalizedCompanies
+                assigned_companies: normalizedCompanies,
+                landing_html: typeof landing_html === 'string' ? landing_html : (currentMeta.landing_html || ''),
+                email_template: typeof email_template === 'string' ? email_template : (currentMeta.email_template || '')
             }
         });
         if (metadataUpdateError) {
