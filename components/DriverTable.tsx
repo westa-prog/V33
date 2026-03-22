@@ -51,6 +51,7 @@ interface DriverTableProps {
   isAdmin: boolean;
   currentUserId?: string;
   fixedBoard?: string;
+  allowedBoards?: string[];
 }
 
 export const DriverTable: React.FC<DriverTableProps> = ({
@@ -67,7 +68,8 @@ export const DriverTable: React.FC<DriverTableProps> = ({
   onResetDriver,
   isAdmin,
   currentUserId,
-  fixedBoard
+  fixedBoard,
+  allowedBoards = []
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isCompanyModalOpen, setIsCompanyModalOpen] = useState(false);
@@ -157,7 +159,11 @@ export const DriverTable: React.FC<DriverTableProps> = ({
     return list.sort();
   }, [companies, drivers]);
 
-  const boards = ['Board A', 'Board B', 'Board C'];
+  const boards = useMemo(() => {
+    if (isAdmin) return ['Board A', 'Board B', 'Board C'];
+    if (allowedBoards.length > 0) return allowedBoards;
+    return fixedBoard ? [fixedBoard] : ['Board A', 'Board B', 'Board C'];
+  }, [allowedBoards, fixedBoard, isAdmin]);
 
   const sortedDrivers = useMemo(() => {
     return [...filteredDrivers].sort((a, b) => {
@@ -822,7 +828,7 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-neutral-500 dark:text-neutral-400 uppercase mb-1">Fleet Board</label>
-                  {isAdmin ? (
+                  {isAdmin || boards.length > 1 ? (
                     <select
                       value={newDriver.board}
                       onChange={(e) => setNewDriver({ ...newDriver, board: e.target.value })}
@@ -880,10 +886,10 @@ export const DriverTable: React.FC<DriverTableProps> = ({
               </div>
               <div>
                 <label className="block text-xs font-bold text-neutral-500 dark:text-neutral-400 uppercase mb-1">Board</label>
-                {isAdmin ? (
-                  <select
-                    value={newCompany.board}
-                    onChange={(e) => setNewCompany((prev) => ({ ...prev, board: e.target.value }))}
+                  {isAdmin || boards.length > 1 ? (
+                    <select
+                      value={newCompany.board}
+                      onChange={(e) => setNewCompany((prev) => ({ ...prev, board: e.target.value }))}
                     className="w-full px-4 py-2 text-sm border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-950 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                   >
                     {boards.map(b => <option key={b} value={b}>{b}</option>)}

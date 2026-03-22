@@ -239,6 +239,8 @@ const App: React.FC = () => {
   const driverOwnerUserId = authUser?.role === 'employee' && authUser?.adminId
     ? authUser.adminId
     : activeUserId;
+  const allowedBoards = normalizeBoardList(authUser?.assignedBoards || (authUser?.assignedBoard ? [authUser.assignedBoard] : []));
+  const fixedEmployeeBoard = !isAdminUser && allowedBoards.length === 1 ? allowedBoards[0] : undefined;
   const rawApiBaseUrl = ((import.meta as any).env.VITE_API_URL || '').trim();
   const apiBaseUrl = rawApiBaseUrl.replace(/\/+$/, '');
   const apiUrl = (path: string) => apiBaseUrl ? `${apiBaseUrl}${path}` : path;
@@ -488,7 +490,9 @@ const App: React.FC = () => {
       }
     );
 
-    const ownBoardId = authUser?.assignedBoard ? normalizeBoard(authUser.assignedBoard).replace('Board ', '') : undefined;
+    const ownBoardId = !isAdminUser && allowedBoards.length === 1
+      ? normalizeBoard(allowedBoards[0]).replace('Board ', '')
+      : undefined;
     const unsubCompanies = subscribeToCompanies((companySnapshot) => {
       setCompanies(companySnapshot);
     }, isAdminUser ? undefined : ownBoardId);
@@ -507,7 +511,7 @@ const App: React.FC = () => {
       unsubLogs();
       unsubReplies();
     };
-  }, [activeUserId, driverOwnerUserId, authUser?.email, authUser?.name, authUser?.assignedBoard, isAdminUser, user?.accessToken, user?.email, user?.name]);
+  }, [activeUserId, driverOwnerUserId, authUser?.email, authUser?.name, allowedBoards.join('|'), isAdminUser, user?.accessToken, user?.email, user?.name]);
 
   useEffect(() => {
     if (!activeUserId) return;
@@ -535,10 +539,12 @@ const App: React.FC = () => {
       setBoardFilter('ALL');
       return;
     }
-    if (authUser?.assignedBoard) {
-      setBoardFilter(normalizeBoard(authUser.assignedBoard));
+    if (allowedBoards.length === 1) {
+      setBoardFilter(normalizeBoard(allowedBoards[0]));
+      return;
     }
-  }, [authUser?.assignedBoard, isAdminUser]);
+    setBoardFilter('ALL');
+  }, [allowedBoards.join('|'), isAdminUser]);
 
   // DEBUG CLI: Access via Browser Console
   useEffect(() => {
@@ -905,13 +911,16 @@ const App: React.FC = () => {
     try {
       const endpoint = apiUrl('/api/drivers/create');
       const selectedCompany = companies.find((c) => c.name === data.company);
+      const requestedBoard = normalizeBoard(data.board);
       const payload = {
         acting_user_id: activeUserId,
         name: data.name,
         email: data.email,
         company: data.company,
         company_id: selectedCompany?.id || null,
-        board: isAdminUser ? normalizeBoard(data.board) : normalizeBoard(authUser?.assignedBoard || data.board),
+        board: isAdminUser
+          ? requestedBoard
+          : (allowedBoards.includes(requestedBoard) ? requestedBoard : (allowedBoards[0] || requestedBoard)),
         deviceType: data.deviceType,
         appVersion: data.appVersion,
         eldStatus: data.eldStatus,
@@ -940,7 +949,11 @@ const App: React.FC = () => {
         body: JSON.stringify({
           acting_user_id: activeUserId,
           name: payload.name,
-          board: isAdminUser ? payload.board : authUser?.assignedBoard
+          board: isAdminUser
+            ? payload.board
+            : (allowedBoards.includes(normalizeBoard(payload.board || ''))
+                ? normalizeBoard(payload.board || '')
+                : allowedBoards[0])
         })
       });
       const data = await response.json();
@@ -1066,7 +1079,7 @@ const App: React.FC = () => {
           )}
         </header>
 
-        {activeTab === 'Dashboard' && <Dashboard drivers={filteredDrivers} assignedBoard={isAdminUser ? undefined : authUser?.assignedBoard} employeeName={isAdminUser ? undefined : authUser?.name} />}
+        {activeTab === 'Dashboard' && <Dashboard drivers={filteredDrivers} assignedBoard={fixedEmployeeBoard} employeeName={isAdminUser ? undefined : authUser?.name} />}
 
         {activeTab === 'Connection' && (
           <div className="space-y-8">
@@ -1089,7 +1102,8 @@ const App: React.FC = () => {
                 onResetDriver={handleResetDriver}
                 isAdmin={isAdminUser}
                 currentUserId={activeUserId}
-                fixedBoard={isAdminUser ? undefined : authUser?.assignedBoard}
+                fixedBoard={fixedEmployeeBoard}
+                allowedBoards={isAdminUser ? undefined : allowedBoards}
               />
             </div>
           </div>
@@ -1097,7 +1111,7 @@ const App: React.FC = () => {
 
         {activeTab === 'Profile Form' && <ProfileForm drivers={filteredDrivers} emailLogs={emailLogs} onSendReminder={handleProfileFormReminder} onUpdatePFDate={handleUpdatePFDate} />}
         {activeTab === 'AI Assistant' && <AIAssistant userId={authUser?.uid} />}
-        {activeTab === 'Broadcast' && <EmailBroadcast drivers={filteredDrivers} assignedBoard={isAdminUser ? undefined : authUser?.assignedBoard} userId={activeUserId} userAccessToken={user?.accessToken} />}
+        {activeTab === 'Broadcast' && <EmailBroadcast drivers={filteredDrivers} assignedBoard={fixedEmployeeBoard} userId={activeUserId} userAccessToken={user?.accessToken} />}
         {activeTab === 'Activity' && isAdminUser && (
           <div className="space-y-4">
             {emailLogs
