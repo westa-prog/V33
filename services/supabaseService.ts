@@ -54,7 +54,11 @@ export const fetchUserProfile = async (userId: string): Promise<UserProfile | nu
     const row: any = data;
     const boards = Array.isArray(row.assigned_boards)
         ? normalizeList(row.assigned_boards)
-        : (typeof row.assigned_board === 'string' && row.assigned_board ? [row.assigned_board] : []);
+        : (typeof row.assigned_board === 'string' && row.assigned_board
+            ? [row.assigned_board]
+            : (typeof row.board_id === 'string' && row.board_id
+                ? [boardIdToLabel(row.board_id)]
+                : []));
     const companies = Array.isArray(row.assigned_companies)
         ? normalizeList(row.assigned_companies)
         : (typeof row.assigned_company === 'string' && row.assigned_company ? [row.assigned_company] : []);

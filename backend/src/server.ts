@@ -52,6 +52,12 @@ const pickAssignedBoards = (profile: any): string[] => {
     if (typeof profile?.assigned_board === 'string' && profile.assigned_board.trim()) {
         return [normalizeBoardName(profile.assigned_board)];
     }
+    if (typeof profile?.board_id === 'string' && profile.board_id.trim()) {
+        return [normalizeBoardName(profile.board_id)];
+    }
+    if (typeof profile?.board === 'string' && profile.board.trim()) {
+        return [normalizeBoardName(profile.board)];
+    }
     return [];
 };
 const pickAssignedCompanies = (profile: any): string[] => {

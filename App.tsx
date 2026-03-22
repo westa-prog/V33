@@ -382,17 +382,18 @@ const App: React.FC = () => {
         const profile = await fetchUserProfile(activeUserId);
 
         if (profile) {
+          const profileBoards = normalizeBoardList(profile.assigned_boards ?? []);
           setAuthUser(prev => prev ? {
             ...prev,
             role: profile.role ?? prev.role,
             adminId: profile.admin_id ?? prev.adminId,
-            // In mixed legacy schemas, auth metadata is more reliable than profiles table.
-            assignedBoards: (prev.assignedBoards && prev.assignedBoards.length > 0)
-              ? prev.assignedBoards
-              : normalizeBoardList(profile.assigned_boards ?? []),
-            assignedBoard: prev.assignedBoard
-              ? normalizeBoard(prev.assignedBoard)
-              : (profile.assigned_boards && profile.assigned_boards.length > 0 ? normalizeBoard(profile.assigned_boards[0]) : undefined),
+            // Prefer DB profile assignments (includes board_id fallback) to avoid stale metadata.
+            assignedBoards: profileBoards.length > 0
+              ? profileBoards
+              : normalizeBoardList(prev.assignedBoards ?? []),
+            assignedBoard: profileBoards.length > 0
+              ? normalizeBoard(profileBoards[0])
+              : (prev.assignedBoard ? normalizeBoard(prev.assignedBoard) : undefined),
             assignedCompanies: profile.assigned_companies ?? [],
             name: profile.name || prev.name,
             email: profile.email || prev.email
