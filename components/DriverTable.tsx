@@ -2,8 +2,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Company, Driver, DutyStatus, ELDStatus, FollowUpStatus } from '../types';
 import {
+  ArrowLeft,
   Search,
-  Filter,
   X,
   UserPlus,
   Save,
@@ -18,7 +18,6 @@ import {
   RefreshCcw,
   Loader2,
   ChevronRight,
-  ChevronDown,
   Building2,
   Users
 } from 'lucide-react';
@@ -74,9 +73,11 @@ export const DriverTable: React.FC<DriverTableProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isCompanyModalOpen, setIsCompanyModalOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [expandedCompanies, setExpandedCompanies] = useState<Set<string>>(new Set());
   const [currentTime, setCurrentTime] = useState(new Date());
   const [sendingId, setSendingId] = useState<string | null>(null);
+  const [selectedCompanyName, setSelectedCompanyName] = useState<string | null>(null);
+  const [companySearchQuery, setCompanySearchQuery] = useState('');
+  const [companyStatusFilter, setCompanyStatusFilter] = useState<'ALL' | 'ACTIVE' | 'ATTENTION' | 'INACTIVE'>('ALL');
 
   const handleSendFollowUp = async (driverId: string) => {
     const confirmed = window.confirm('Send alert email now?');
@@ -159,6 +160,14 @@ export const DriverTable: React.FC<DriverTableProps> = ({
     return list.sort();
   }, [companies, drivers]);
 
+  const boardIdToLabel = (boardId?: string | null) => {
+    const raw = (boardId || '').trim().toUpperCase();
+    if (raw === 'A') return 'Board A';
+    if (raw === 'B') return 'Board B';
+    if (raw === 'C') return 'Board C';
+    return '';
+  };
+
   const boards = useMemo(() => {
     if (isAdmin) return ['Board A', 'Board B', 'Board C'];
     if (allowedBoards.length > 0) return allowedBoards;
@@ -180,6 +189,43 @@ export const DriverTable: React.FC<DriverTableProps> = ({
     });
   }, [filteredDrivers]);
 
+  const companyRows = useMemo(() => {
+    return companyNames.map((name, index) => {
+      const companyDrivers = drivers.filter((d) => d.company === name);
+      const companyRecord = companies.find((c) => c.name === name);
+      const board = companyDrivers[0]?.board || boardIdToLabel(companyRecord?.boardId) || 'Unassigned';
+      const connectedCount = companyDrivers.filter((d) => d.eldStatus === ELDStatus.CONNECTED).length;
+      const attentionCount = companyDrivers.filter((d) =>
+        d.hasPendingAlert || (d.eldStatus === ELDStatus.DISCONNECTED && (d.dutyStatus === DutyStatus.DRIVING || d.dutyStatus === DutyStatus.ON_DUTY))
+      ).length;
+      const status = attentionCount > 0 ? 'ATTENTION' : connectedCount > 0 ? 'ACTIVE' : 'INACTIVE';
+
+      return {
+        index: index + 1,
+        name,
+        board,
+        totalDrivers: companyDrivers.length,
+        connectedCount,
+        attentionCount,
+        status
+      };
+    }).filter((row) => {
+      const matchesSearch = row.name.toLowerCase().includes(companySearchQuery.toLowerCase());
+      const matchesStatus = companyStatusFilter === 'ALL' || row.status === companyStatusFilter;
+      return matchesSearch && matchesStatus;
+    });
+  }, [companies, companyNames, companySearchQuery, companyStatusFilter, drivers]);
+
+  const selectedCompanySummary = useMemo(() => {
+    if (!selectedCompanyName) return null;
+    return companyRows.find((row) => row.name === selectedCompanyName) || null;
+  }, [companyRows, selectedCompanyName]);
+
+  const detailDrivers = useMemo(() => {
+    if (!selectedCompanyName) return [];
+    return sortedDrivers.filter((d) => d.company === selectedCompanyName);
+  }, [selectedCompanyName, sortedDrivers]);
+
   const toggleSelect = (id: string) => {
     const next = new Set(selectedIds);
     if (next.has(id)) next.delete(id);
@@ -188,10 +234,10 @@ export const DriverTable: React.FC<DriverTableProps> = ({
   };
 
   const toggleSelectAll = () => {
-    if (selectedIds.size === sortedDrivers.length) {
+    if (detailDrivers.length > 0 && selectedIds.size === detailDrivers.length) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(sortedDrivers.map(d => d.id)));
+      setSelectedIds(new Set(detailDrivers.map(d => d.id)));
     }
   };
 
@@ -264,41 +310,14 @@ export const DriverTable: React.FC<DriverTableProps> = ({
   };
 
   const hasActiveFilters = filters.searchQuery !== '' || filters.eldFilter !== 'ALL' || filters.dutyFilter !== 'ALL' || filters.companyFilter !== 'ALL' || filters.boardFilter !== 'ALL';
-  const companyStats = useMemo(() => {
-    return companyNames.map((name) => ({
-      name,
-      count: drivers.filter((d) => d.company === name).length
-    }));
-  }, [companyNames, drivers]);
-  const companyDriverGroups = useMemo(() => {
-    const groups = new Map<string, Driver[]>();
-    filteredDrivers.forEach((driver) => {
-      const key = driver.company || 'Unassigned';
-      const current = groups.get(key) || [];
-      current.push(driver);
-      groups.set(key, current);
-    });
+  const hasDetailFilters = filters.searchQuery !== '' || filters.eldFilter !== 'ALL' || filters.dutyFilter !== 'ALL' || filters.boardFilter !== 'ALL';
 
-    return Array.from(groups.entries())
-      .map(([name, companyDrivers]) => ({
-        name,
-        companyDrivers: companyDrivers.sort((a, b) => a.name.localeCompare(b.name))
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [filteredDrivers]);
-
-  const toggleCompanyExpand = (companyName: string) => {
-    setExpandedCompanies((prev) => {
-      const next = new Set(prev);
-      if (next.has(companyName)) next.delete(companyName);
-      else next.add(companyName);
-      return next;
-    });
-  };
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [selectedCompanyName]);
 
   return (
     <div className="space-y-4 relative">
-      {/* Action & Filtering Bar */}
       <div className="flex flex-wrap items-center gap-4 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-800 transition-colors">
         <div className="flex items-center gap-2">
           <button
@@ -308,179 +327,217 @@ export const DriverTable: React.FC<DriverTableProps> = ({
             <Save className="w-4 h-4" />
             Add Company
           </button>
-          <button
-            onClick={() => setIsModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 transition-all shadow-sm active:scale-95"
-          >
-            <UserPlus className="w-4 h-4" />
-            Add Driver
-          </button>
+          {selectedCompanyName && (
+            <button
+              onClick={() => {
+                setNewDriver((prev) => ({ ...prev, company: selectedCompanyName }));
+                setIsModalOpen(true);
+              }}
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 transition-all shadow-sm active:scale-95"
+            >
+              <UserPlus className="w-4 h-4" />
+              Add Driver
+            </button>
+          )}
         </div>
 
-        <div className="h-8 w-px bg-slate-200 dark:bg-slate-700 mx-2 hidden md:block"></div>
+        {!selectedCompanyName ? (
+          <>
+            <div className="relative flex-1 min-w-[220px]">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <Search className="h-4 w-4 text-slate-400" />
+              </div>
+              <input
+                type="text"
+                placeholder="Search company..."
+                value={companySearchQuery}
+                onChange={(e) => setCompanySearchQuery(e.target.value)}
+                className="block w-full pl-10 pr-3 py-2 text-sm border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all shadow-sm"
+              />
+            </div>
 
-        <div className="relative flex-1 min-w-[200px]">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <Search className="h-4 w-4 text-slate-400" />
-          </div>
-          <input
-            type="text"
-            placeholder="Search by driver name..."
-            value={filters.searchQuery}
-            onChange={(e) => setFilters.setSearchQuery(e.target.value)}
-            className="block w-full pl-10 pr-3 py-2 text-sm border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all shadow-sm"
-          />
-        </div>
+            <select
+              value={companyStatusFilter}
+              onChange={(e) => setCompanyStatusFilter(e.target.value as 'ALL' | 'ACTIVE' | 'ATTENTION' | 'INACTIVE')}
+              className="text-sm border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 dark:text-slate-300 px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm font-medium"
+            >
+              <option value="ALL">All Statuses</option>
+              <option value="ACTIVE">Active</option>
+              <option value="ATTENTION">Needs Attention</option>
+              <option value="INACTIVE">Inactive</option>
+            </select>
+          </>
+        ) : (
+          <>
+            <button
+              onClick={() => {
+                setSelectedCompanyName(null);
+                setFilters.setCompanyFilter('ALL');
+                setFilters.setSearchQuery('');
+                setFilters.setEldFilter('ALL');
+                setFilters.setDutyFilter('ALL');
+                setFilters.setBoardFilter('ALL');
+              }}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-white dark:hover:bg-slate-900"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Back To Companies
+            </button>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          <select
-            value={filters.companyFilter}
-            onChange={(e) => setFilters.setCompanyFilter(e.target.value)}
-            className="text-sm border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 dark:text-slate-300 px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm font-medium"
-          >
-            <option value="ALL">All Companies</option>
-            {companyNames.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
+            <div className="relative flex-1 min-w-[220px]">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <Search className="h-4 w-4 text-slate-400" />
+              </div>
+              <input
+                type="text"
+                placeholder="Search company drivers..."
+                value={filters.searchQuery}
+                onChange={(e) => setFilters.setSearchQuery(e.target.value)}
+                className="block w-full pl-10 pr-3 py-2 text-sm border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all shadow-sm"
+              />
+            </div>
 
-          <select
-            value={filters.boardFilter}
-            onChange={(e) => setFilters.setBoardFilter(e.target.value)}
-            className="text-sm border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 dark:text-slate-300 px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm font-medium"
-          >
-            <option value="ALL">All Boards</option>
-            {boards.map(b => <option key={b} value={b}>{b}</option>)}
-          </select>
+            <div className="flex items-center gap-2 flex-wrap">
+              <select
+                value={filters.boardFilter}
+                onChange={(e) => setFilters.setBoardFilter(e.target.value)}
+                className="text-sm border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 dark:text-slate-300 px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm font-medium"
+              >
+                <option value="ALL">All Boards</option>
+                {boards.map(b => <option key={b} value={b}>{b}</option>)}
+              </select>
 
-          <select
-            value={filters.eldFilter}
-            onChange={(e) => setFilters.setEldFilter(e.target.value as ELDStatus | 'ALL')}
-            className="text-sm border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 dark:text-slate-300 px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm font-medium"
-          >
-            <option value="ALL">All Connections</option>
-            <option value={ELDStatus.CONNECTED}>Connected</option>
-            <option value={ELDStatus.DISCONNECTED}>Disconnected</option>
-          </select>
+              <select
+                value={filters.eldFilter}
+                onChange={(e) => setFilters.setEldFilter(e.target.value as ELDStatus | 'ALL')}
+                className="text-sm border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 dark:text-slate-300 px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm font-medium"
+              >
+                <option value="ALL">All Connections</option>
+                <option value={ELDStatus.CONNECTED}>Connected</option>
+                <option value={ELDStatus.DISCONNECTED}>Disconnected</option>
+              </select>
 
-          <select
-            value={filters.dutyFilter}
-            onChange={(e) => setFilters.setDutyFilter(e.target.value as DutyStatus | 'ALL')}
-            className="text-sm border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 dark:text-slate-300 px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm font-medium"
-          >
-            <option value="ALL">All Duty Status</option>
-            {Object.values(DutyStatus).map(status => (
-              <option key={status} value={status}>{status}</option>
-            ))}
-          </select>
-        </div>
+              <select
+                value={filters.dutyFilter}
+                onChange={(e) => setFilters.setDutyFilter(e.target.value as DutyStatus | 'ALL')}
+                className="text-sm border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 dark:text-slate-300 px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm font-medium"
+              >
+                <option value="ALL">All Duty Status</option>
+                {Object.values(DutyStatus).map(status => (
+                  <option key={status} value={status}>{status}</option>
+                ))}
+              </select>
+            </div>
 
-        {hasActiveFilters && (
-          <button
-            onClick={clearFilters}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
-          >
-            <X className="w-3.5 h-3.5" />
-            Clear
-          </button>
+            {hasDetailFilters && (
+              <button
+                onClick={() => {
+                  setFilters.setSearchQuery('');
+                  setFilters.setEldFilter('ALL');
+                  setFilters.setDutyFilter('ALL');
+                  setFilters.setBoardFilter('ALL');
+                }}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+              >
+                <X className="w-3.5 h-3.5" />
+                Clear
+              </button>
+            )}
+          </>
         )}
       </div>
 
-      <div className="flex items-center gap-2 px-2 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-widest bg-indigo-50/50 dark:bg-indigo-950/30 w-fit py-1 rounded-md">
-        <ArrowUpAZ className="w-3 h-3" />
-        Escalation Sorting: Oldest alerts prioritized at top
-      </div>
-
-      <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h4 className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">Connection {'>>'} Companies {'>>'} Drivers</h4>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setFilters.setCompanyFilter('ALL')}
-              className="text-xs font-bold text-indigo-600 hover:text-indigo-700"
-            >
-              Show all companies
-            </button>
-            <button
-              onClick={() => setExpandedCompanies(new Set(companyDriverGroups.map((g) => g.name)))}
-              className="text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white"
-            >
-              Expand all
-            </button>
-            <button
-              onClick={() => setExpandedCompanies(new Set())}
-              className="text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white"
-            >
-              Collapse all
-            </button>
+      {!selectedCompanyName ? (
+        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center gap-2">
+            <Building2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+            <h4 className="text-sm font-black text-slate-900 dark:text-white">Companies</h4>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
+              <thead className="bg-slate-50 dark:bg-slate-800/50">
+                <tr>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">No</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Name</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Board</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Status</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Drivers</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Connected</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                {companyRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-6 py-12 text-center text-slate-400 italic">
+                      No companies found.
+                    </td>
+                  </tr>
+                ) : companyRows.map((company) => (
+                  <tr key={company.name} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                    <td className="px-6 py-4 text-sm text-slate-500 dark:text-slate-400">{company.index}</td>
+                    <td className="px-6 py-4">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedCompanyName(company.name);
+                          setFilters.setCompanyFilter(company.name);
+                          setFilters.setSearchQuery('');
+                          setFilters.setEldFilter('ALL');
+                          setFilters.setDutyFilter('ALL');
+                          setFilters.setBoardFilter('ALL');
+                        }}
+                        className="flex items-center gap-2 text-left text-sm font-semibold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300"
+                      >
+                        <span>{company.name}</span>
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-slate-700 dark:text-slate-300">{company.board}</td>
+                    <td className="px-6 py-4">
+                      <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-bold ${
+                        company.status === 'ATTENTION'
+                          ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+                          : company.status === 'ACTIVE'
+                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+                            : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                      }`}>
+                        {company.status === 'ATTENTION' ? 'Needs Attention' : company.status === 'ACTIVE' ? 'Active' : 'Inactive'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-sm font-semibold text-slate-900 dark:text-white">{company.totalDrivers}</td>
+                    <td className="px-6 py-4 text-sm text-slate-700 dark:text-slate-300">{company.connectedCount}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {companyStats.map((c) => (
-            <button
-              key={c.name}
-              onClick={() => setFilters.setCompanyFilter(c.name)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${
-                filters.companyFilter === c.name
-                  ? 'bg-indigo-600 text-white border-indigo-600'
-                  : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
-              }`}
-            >
-              {c.name} ({c.count})
-            </button>
-          ))}
-        </div>
-        <div className="mt-4 space-y-2">
-          {companyDriverGroups.length === 0 && (
-            <div className="text-xs text-slate-500 dark:text-slate-400 italic">No companies/drivers found for current filters.</div>
-          )}
-          {companyDriverGroups.map((group) => {
-            const isOpen = expandedCompanies.has(group.name);
-            return (
-              <div key={group.name} className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => toggleCompanyExpand(group.name)}
-                  className="w-full flex items-center justify-between px-3 py-2 bg-slate-50 dark:bg-slate-800/70 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                >
-                  <div className="flex items-center gap-2 text-left">
-                    {isOpen ? <ChevronDown className="w-4 h-4 text-slate-500" /> : <ChevronRight className="w-4 h-4 text-slate-500" />}
-                    <Building2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                    <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">{group.name}</span>
-                  </div>
-                  <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded-full bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300">
-                    <Users className="w-3 h-3" />
-                    {group.companyDrivers.length}
-                  </span>
-                </button>
-                {isOpen && (
-                  <div className="divide-y divide-slate-200 dark:divide-slate-700">
-                    {group.companyDrivers.map((d) => (
-                      <div key={d.id} className="px-3 py-2 flex flex-wrap items-center justify-between gap-2 bg-white dark:bg-slate-900">
-                        <div>
-                          <div className="text-sm font-medium text-slate-900 dark:text-slate-100">{d.name}</div>
-                          <div className="text-[11px] text-slate-500 dark:text-slate-400">{d.email}</div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-bold px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                            {d.board}
-                          </span>
-                          <span className={`text-[10px] font-bold px-2 py-1 rounded ${
-                            d.eldStatus === ELDStatus.CONNECTED
-                              ? 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300'
-                              : 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300'
-                          }`}>
-                            {d.eldStatus}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-5">
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Company</p>
+              <h4 className="mt-2 text-xl font-black text-slate-900 dark:text-white">{selectedCompanySummary?.name || selectedCompanyName}</h4>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{selectedCompanySummary?.board || 'Unassigned'}</p>
+            </div>
+            <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-5">
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Drivers</p>
+              <h4 className="mt-2 text-3xl font-black text-slate-900 dark:text-white">{selectedCompanySummary?.totalDrivers || detailDrivers.length}</h4>
+            </div>
+            <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-5">
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Attention</p>
+              <h4 className="mt-2 text-3xl font-black text-slate-900 dark:text-white">{selectedCompanySummary?.attentionCount || 0}</h4>
+            </div>
+          </div>
 
+          <div className="flex items-center gap-2 px-2 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-widest bg-indigo-50/50 dark:bg-indigo-950/30 w-fit py-1 rounded-md">
+            <ArrowUpAZ className="w-3 h-3" />
+            Company Drivers
+          </div>
+        </>
+      )}
+
+      {selectedCompanyName && (
       <div className="overflow-x-auto bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 transition-colors">
         <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
           <thead className="bg-slate-50 dark:bg-slate-800/50">
@@ -489,7 +546,7 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                 {isAdmin && (
                   <input
                     type="checkbox"
-                    checked={sortedDrivers.length > 0 && selectedIds.size === sortedDrivers.length}
+                    checked={detailDrivers.length > 0 && selectedIds.size === detailDrivers.length}
                     onChange={toggleSelectAll}
                     className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                   />
@@ -506,7 +563,7 @@ export const DriverTable: React.FC<DriverTableProps> = ({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-            {sortedDrivers.length > 0 ? sortedDrivers.map((driver) => (
+            {detailDrivers.length > 0 ? detailDrivers.map((driver) => (
               <tr key={driver.id} className={`${getRowColor(driver)} transition-colors duration-200`}>
                 <td className="px-4 py-4 whitespace-nowrap">
                   {isAdmin && (
@@ -726,17 +783,18 @@ export const DriverTable: React.FC<DriverTableProps> = ({
             )) : (
               <tr>
                 <td colSpan={10} className="px-6 py-12 text-center text-slate-400 italic">
-                  No drivers found matching your criteria.
+                  No drivers found for this company.
                 </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
+      )}
 
       {/* Bulk Action Bar */}
       <AnimatePresence>
-        {isAdmin && selectedIds.size > 0 && (
+        {isAdmin && selectedCompanyName && selectedIds.size > 0 && (
           <motion.div
             initial={{ y: 100, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
