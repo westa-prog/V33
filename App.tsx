@@ -963,6 +963,7 @@ const App: React.FC = () => {
           activeTab={activeTab} 
           setActiveTab={setActiveTab} 
           isAdmin={isAdminUser}
+          onLogout={handleLogout}
         />
       )}
       

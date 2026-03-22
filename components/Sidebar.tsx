@@ -7,7 +7,8 @@ import {
   TrendingUp, 
   Mail,
   UserPlus,
-  Settings
+  Settings,
+  LogOut
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -27,9 +28,10 @@ interface SidebarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   isAdmin: boolean;
+  onLogout: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, isAdmin }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, isAdmin, onLogout }) => {
   return (
     <div className="w-64 h-full bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-r border-slate-200 dark:border-slate-800/60 flex flex-col z-40 relative">
       <div className="flex-1 overflow-y-auto py-6 px-4 space-y-2 mt-4">
@@ -60,6 +62,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, isAdm
             </button>
           )
         })}
+      </div>
+      <div className="p-4 border-t border-slate-200 dark:border-slate-800/70">
+        <button
+          onClick={onLogout}
+          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/40 font-semibold transition-colors"
+        >
+          <LogOut className="w-4 h-4" />
+          Log out
+        </button>
       </div>
     </div>
   );
