@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
 import { AuthUser } from '../types';
-import { Mail, Lock, User, ShieldCheck } from 'lucide-react';
+import { Mail, Lock, ShieldCheck } from 'lucide-react';
 import { SplineScene } from './ui/splite';
 import { Card } from './ui/card';
 import { Spotlight } from './ui/spotlight';
 import { HeroBackground } from './ui/shape-landing-hero';
 import { motion } from 'framer-motion';
-import { cn } from '../lib/utils';
 import { supabase } from '../supabase';
 
 interface LoginProps {
@@ -14,10 +13,8 @@ interface LoginProps {
 }
 
 export const Login: React.FC<LoginProps> = ({ onLogin }) => {
-  const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleGoogleAppLogin = async () => {
@@ -40,51 +37,6 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
     setIsSubmitting(true);
 
     try {
-      if (isSignUp) {
-        const signUpResult = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: {
-              full_name: name || email.split('@')[0]
-            }
-          }
-        });
-
-        if (signUpResult.error) {
-          throw signUpResult.error;
-        }
-
-        const signInResult = await supabase.auth.signInWithPassword({ email, password });
-        if (signInResult.error) {
-          throw signInResult.error;
-        }
-
-        const signedInUser = signInResult.data.user;
-        onLogin({
-          uid: signedInUser.id,
-          email: signedInUser.email || email,
-          name: (signedInUser.user_metadata?.full_name as string) || name || email.split('@')[0],
-          role: (signedInUser.user_metadata?.role as string) || undefined,
-          adminId: (signedInUser.user_metadata?.admin_id as string) || undefined,
-          assignedBoards: Array.isArray(signedInUser.user_metadata?.assigned_boards)
-            ? signedInUser.user_metadata.assigned_boards
-            : (signedInUser.user_metadata?.assigned_board ? [signedInUser.user_metadata.assigned_board] : []),
-          assignedBoard: Array.isArray(signedInUser.user_metadata?.assigned_boards) && signedInUser.user_metadata.assigned_boards.length > 0
-            ? signedInUser.user_metadata.assigned_boards[0]
-            : (signedInUser.user_metadata?.assigned_board as string) || undefined,
-          assignedCompanies: Array.isArray(signedInUser.user_metadata?.assigned_companies)
-            ? signedInUser.user_metadata.assigned_companies
-            : (signedInUser.user_metadata?.assigned_company ? [signedInUser.user_metadata.assigned_company] : []),
-          landingHtml: (signedInUser.user_metadata?.landing_html as string) || '',
-          emailTemplate: (signedInUser.user_metadata?.email_template as string) || '',
-          emailTemplates: typeof signedInUser.user_metadata?.email_templates === 'object' && signedInUser.user_metadata?.email_templates
-            ? signedInUser.user_metadata.email_templates
-            : undefined
-        });
-        return;
-      }
-
       const signInResult = await supabase.auth.signInWithPassword({ email, password });
       if (signInResult.error) {
         throw signInResult.error;
@@ -142,7 +94,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
             <div className="flex flex-col gap-3 mb-8">
               <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 p-4 text-sm text-neutral-300">
-                Employees should sign in with the real email address assigned by the admin. Google sign-in will claim board access automatically after the first join.
+                Sign in with the email assigned to your account.
               </div>
 
               <div className="flex items-center gap-3 text-xs text-neutral-500 uppercase font-bold">
@@ -150,27 +102,6 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 <span>Secure email login</span>
                 <div className="h-px bg-neutral-800 flex-1" />
               </div>
-            </div>
-
-            <div className="flex mb-8 bg-neutral-800 p-1 rounded-xl">
-              <button
-                onClick={() => setIsSignUp(false)}
-                className={cn(
-                  'flex-1 py-2 text-sm font-bold rounded-lg transition-all',
-                  !isSignUp ? 'bg-indigo-600 text-white shadow-sm' : 'text-neutral-500 hover:text-neutral-300'
-                )}
-              >
-                Sign In
-              </button>
-              <button
-                onClick={() => setIsSignUp(true)}
-                className={cn(
-                  'flex-1 py-2 text-sm font-bold rounded-lg transition-all',
-                  isSignUp ? 'bg-indigo-600 text-white shadow-sm' : 'text-neutral-500 hover:text-neutral-300'
-                )}
-              >
-                Sign Up
-              </button>
             </div>
 
             <button
@@ -182,23 +113,6 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
             </button>
 
             <form onSubmit={handleSubmit} className="space-y-5">
-              {isSignUp && (
-                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-                  <label className="block text-xs font-bold text-neutral-500 uppercase mb-2 ml-1">Full Name</label>
-                  <div className="relative">
-                    <User className="absolute left-3 top-3 w-5 h-5 text-neutral-500" />
-                    <input
-                      type="text"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      required
-                      className="w-full pl-10 pr-4 py-3 bg-neutral-900/50 border border-neutral-800 rounded-xl focus:ring-2 focus:ring-indigo-600 outline-none transition-all text-white placeholder-neutral-600"
-                      placeholder="Enter your name"
-                    />
-                  </div>
-                </motion.div>
-              )}
-
               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
                 <label className="block text-xs font-bold text-neutral-500 uppercase mb-2 ml-1">Email Address</label>
                 <div className="relative">
@@ -236,19 +150,9 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 disabled={isSubmitting}
                 className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-bold transition-all shadow-lg shadow-indigo-600/30 disabled:opacity-60"
               >
-                {isSubmitting ? 'Please wait...' : isSignUp ? 'Create Account' : 'Sign In'}
+                {isSubmitting ? 'Please wait...' : 'Sign In'}
               </motion.button>
             </form>
-
-            <div className="mt-8 text-center text-sm text-neutral-500">
-              {isSignUp ? 'Already have an account?' : "Don't have an account?"}
-              <button
-                onClick={() => setIsSignUp(!isSignUp)}
-                className="ml-1 text-indigo-400 font-bold hover:text-indigo-300 transition-colors"
-              >
-                {isSignUp ? 'Sign In' : 'Sign Up'}
-              </button>
-            </div>
           </div>
 
           <div className="hidden md:block w-1/2 relative bg-neutral-950 overflow-hidden">
