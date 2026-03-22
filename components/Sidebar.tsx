@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { 
   LayoutDashboard, 
   Wifi, 
@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { DatabaseSyncControl } from './DatabaseSyncControl';
+import { cn } from '@/lib/utils';
 
 export const menuItems = [
   { icon: LayoutDashboard, label: "Dashboard", id: 'Dashboard', color: "text-blue-500" },
@@ -62,104 +63,155 @@ export const Sidebar: React.FC<SidebarProps> = ({
   profilePicture
 }) => {
   const [showQuick, setShowQuick] = useState(true);
+  const visibleMenuItems = useMemo(
+    () => menuItems.filter((item) => !item.adminOnly || isAdmin),
+    [isAdmin]
+  );
+  const profileEmail = profileName ? `${profileName.toLowerCase().replace(/\s+/g, '.')}@algogroup.us` : 'user@algogroup.us';
+  const fallbackAvatar = 'https://images.unsplash.com/photo-1544723795-3fb6469f5b39?w=900&auto=format&fit=crop&q=60&ixlib=M3wxMjA3fDB8MHxzZWFyY2h8Mjh8fHByb2ZpbGV8ZW58MHx8MHx8fDA%3D';
+  const sidebarVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.08,
+      },
+    },
+  };
+  const itemVariants = {
+    hidden: { opacity: 0, x: -20 },
+    visible: {
+      opacity: 1,
+      x: 0,
+      transition: {
+        type: 'spring',
+        stiffness: 100,
+        damping: 15,
+      },
+    },
+  };
 
   return (
-    <div className="w-64 h-full bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-r border-slate-200 dark:border-slate-800/60 flex flex-col z-40 relative">
-      <div className="flex-1 overflow-y-auto py-6 px-4 space-y-2 mt-4">
-        <h3 className="px-4 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4">Navigation</h3>
-        {menuItems.map(item => {
-          if (item.adminOnly && !isAdmin) return null;
-          
-          const isActive = activeTab === item.id;
+    <motion.aside
+      className="z-40 m-3 flex h-[calc(100%-1.5rem)] w-72 flex-col rounded-3xl border border-white/50 bg-white/70 p-4 text-slate-900 shadow-[0_24px_80px_rgba(15,23,42,0.14)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/65 dark:text-slate-100"
+      initial="hidden"
+      animate="visible"
+      variants={sidebarVariants}
+      aria-label="App Sidebar"
+    >
+      <motion.div variants={itemVariants} className="flex items-center space-x-4 p-2">
+        <img
+          src={profilePicture || fallbackAvatar}
+          alt={`${profileName || 'User'} avatar`}
+          className="h-12 w-12 rounded-full object-cover ring-2 ring-white/70 dark:ring-white/10"
+        />
+        <div className="flex min-w-0 flex-col truncate">
+          <span className="truncate text-lg font-semibold">{profileName || 'User'}</span>
+          <span className="truncate text-sm text-slate-500 dark:text-slate-400">{profileEmail}</span>
+        </div>
+      </motion.div>
+
+      <motion.div variants={itemVariants} className="my-4 border-t border-slate-200/80 dark:border-slate-800" />
+
+      <nav className="flex-1 space-y-1 overflow-y-auto pr-1" role="navigation">
+        {visibleMenuItems.map((item, index) => {
           const Icon = item.icon;
-          
+          const isActive = activeTab === item.id;
+
           return (
-            <button
-               key={item.id}
-               onClick={() => setActiveTab(item.id)}
-               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all relative overflow-hidden ${
-                 isActive 
-                   ? 'bg-slate-100 dark:bg-slate-800 shadow-sm' 
-                   : 'hover:bg-slate-50 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-400'
-               }`}
-            >
-              <Icon className={`w-5 h-5 ${item.color} ${isActive ? 'opacity-100' : 'opacity-70'} z-10`} />
-              <span className={`font-semibold z-10 ${isActive ? 'text-slate-900 dark:text-white' : ''}`}>
-                {item.label}
-              </span>
-              {isActive && (
-                <motion.div layoutId="sidebar-active" className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-500 rounded-r-full z-20" />
-              )}
-            </button>
-          )
-        })}
-
-        <div className="mt-5 pt-5 border-t border-slate-200 dark:border-slate-800">
-          <button
-            type="button"
-            onClick={() => setShowQuick((v) => !v)}
-            className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
-          >
-            <span>Quick Controls</span>
-            {showQuick ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-          </button>
-          {showQuick && (
-            <div className="mt-3 space-y-3 px-1">
-              <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-bold ${
-                googleConnected
-                  ? 'bg-emerald-50 dark:bg-emerald-900/30 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
-                  : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
-              }`}>
-                <span className={`inline-block w-2 h-2 rounded-full ${googleConnected ? 'bg-emerald-500' : 'bg-slate-400'}`}></span>
-                Google {googleConnected ? 'Connected' : 'Disconnected'}
-              </div>
-
-              {!googleConnected && (
-                <button
-                  onClick={onGoogleConnect}
-                  disabled={!googleClientIdPresent}
-                  className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-indigo-50 dark:bg-slate-800 text-indigo-700 dark:text-white text-xs font-bold border border-indigo-200 dark:border-slate-700 hover:bg-indigo-100 disabled:opacity-60 disabled:cursor-not-allowed"
-                  title={!googleClientIdPresent ? 'Set VITE_GOOGLE_CLIENT_ID to enable Google login' : 'Connect Google'}
-                >
-                  <PlugZap className="w-4 h-4" />
-                  {googleClientIdPresent ? 'Connect Google' : 'Google ID Missing'}
-                </button>
-              )}
-
-              <DatabaseSyncControl
-                isConnected={dbConnected}
-                isSyncing={isSyncing}
-                lastSync={lastSync}
-                isLiveMode={isLiveMode}
-                onToggleLiveMode={onToggleLiveMode}
-              />
-
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
-                {profilePicture ? (
-                  <img src={profilePicture} alt="Profile" className="w-7 h-7 rounded-full border border-slate-300 dark:border-slate-600" />
-                ) : (
-                  <div className="w-7 h-7 rounded-full bg-indigo-100 dark:bg-indigo-900 flex items-center justify-center">
-                    <User className="w-4 h-4 text-indigo-600 dark:text-indigo-300" />
-                  </div>
+            <React.Fragment key={item.id}>
+              {item.id === 'Settings' && <motion.div variants={itemVariants} className="h-5" />}
+              <motion.button
+                type="button"
+                variants={itemVariants}
+                onClick={() => setActiveTab(item.id)}
+                className={cn(
+                  'group flex w-full items-center rounded-2xl px-3 py-3 text-sm font-medium transition-colors',
+                  isActive
+                    ? 'bg-slate-900 text-white shadow-sm dark:bg-white dark:text-slate-950'
+                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900/80 dark:hover:text-slate-50'
                 )}
-                <div className="min-w-0">
-                  <div className="text-xs font-bold text-slate-700 dark:text-slate-200 truncate">{profileName || 'User'}</div>
-                  <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">API Connect</div>
-                </div>
+              >
+                <span className={cn('mr-3 h-5 w-5', !isActive && item.color)}>
+                  <Icon className="h-full w-full" />
+                </span>
+                <span>{item.label}</span>
+                <ChevronRight className="ml-auto h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100" />
+              </motion.button>
+              {index === visibleMenuItems.length - 2 && item.id !== 'Settings' ? null : null}
+            </React.Fragment>
+          );
+        })}
+      </nav>
+
+      <motion.div variants={itemVariants} className="mt-4 rounded-2xl border border-slate-200/80 bg-white/70 p-3 dark:border-slate-800 dark:bg-slate-900/70">
+        <button
+          type="button"
+          onClick={() => setShowQuick((v) => !v)}
+          className="flex w-full items-center justify-between rounded-xl px-2 py-2 text-xs font-bold uppercase tracking-[0.2em] text-slate-500 transition-colors hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+        >
+          <span>Quick Controls</span>
+          {showQuick ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+        </button>
+
+        {showQuick && (
+          <div className="mt-3 space-y-3">
+            <div
+              className={cn(
+                'flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-bold',
+                googleConnected
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300'
+                  : 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
+              )}
+            >
+              <span className={cn('inline-block h-2 w-2 rounded-full', googleConnected ? 'bg-emerald-500' : 'bg-slate-400')} />
+              Google {googleConnected ? 'Connected' : 'Disconnected'}
+            </div>
+
+            {!googleConnected && (
+              <button
+                onClick={onGoogleConnect}
+                disabled={!googleClientIdPresent}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 transition-colors hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                title={!googleClientIdPresent ? 'Set VITE_GOOGLE_CLIENT_ID to enable Google login' : 'Connect Google'}
+              >
+                <PlugZap className="h-4 w-4" />
+                {googleClientIdPresent ? 'Connect Google' : 'Google ID Missing'}
+              </button>
+            )}
+
+            <DatabaseSyncControl
+              isConnected={dbConnected}
+              isSyncing={isSyncing}
+              lastSync={lastSync}
+              isLiveMode={isLiveMode}
+              onToggleLiveMode={onToggleLiveMode}
+            />
+
+            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-100 dark:bg-indigo-900">
+                <User className="h-4 w-4 text-indigo-600 dark:text-indigo-300" />
+              </div>
+              <div className="min-w-0">
+                <div className="truncate text-xs font-bold text-slate-700 dark:text-slate-200">{profileName || 'User'}</div>
+                <div className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">API Connect</div>
               </div>
             </div>
-          )}
-        </div>
-      </div>
-      <div className="p-4 border-t border-slate-200 dark:border-slate-800/70">
+          </div>
+        )}
+      </motion.div>
+
+      <motion.div variants={itemVariants} className="mt-4">
         <button
           onClick={onLogout}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/40 font-semibold transition-colors"
+          className="group flex w-full items-center rounded-2xl px-3 py-3 text-sm font-medium text-red-600 transition-colors hover:bg-red-500/10 dark:text-red-300"
         >
-          <LogOut className="w-4 h-4" />
-          Log out
+          <span className="mr-3 h-5 w-5">
+            <LogOut className="h-full w-full" />
+          </span>
+          <span>Log out</span>
         </button>
-      </div>
-    </div>
+      </motion.div>
+    </motion.aside>
   );
 };

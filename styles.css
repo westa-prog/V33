@@ -3,22 +3,26 @@
 
 body {
   font-family: 'Inter', sans-serif;
-  background: #f8fafc;
+  background:
+    radial-gradient(circle at top, rgba(99, 102, 241, 0.14), transparent 28%),
+    linear-gradient(180deg, #f8fafc 0%, #eef2ff 48%, #f8fafc 100%);
   color: #0f172a;
-  transition: background-color 180ms ease, color 180ms ease;
+  transition: background 180ms ease, color 180ms ease;
 }
 
 html.dark body {
-  background: #020617;
+  background:
+    radial-gradient(circle at top, rgba(251, 146, 60, 0.14), transparent 28%),
+    linear-gradient(180deg, #020617 0%, #000000 100%);
   color: #e2e8f0;
 }
 
 .app-shell.theme-light {
-  background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.62) 0%, rgba(238, 242, 255, 0.4) 100%);
 }
 
 .app-shell.theme-dark {
-  background: radial-gradient(circle at 10% 10%, #1e293b 0%, #020617 55%, #020617 100%);
+  background: radial-gradient(circle at 10% 10%, rgba(30, 41, 59, 0.48) 0%, rgba(2, 6, 23, 0.34) 55%, rgba(2, 6, 23, 0.18) 100%);
 }
 
 .theme-light .app-header {

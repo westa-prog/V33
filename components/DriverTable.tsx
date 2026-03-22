@@ -20,9 +20,12 @@ import {
   PenSquare,
   ChevronRight,
   Building2,
-  Users
+  Users,
+  Trash,
+  CheckCircle2 as CheckIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { DropdownMenu } from './ui/dropdown-menu';
 
 interface DriverTableProps {
   drivers: Driver[]; // Original list for dropdowns
@@ -83,8 +86,6 @@ export const DriverTable: React.FC<DriverTableProps> = ({
   const [selectedCompanyName, setSelectedCompanyName] = useState<string | null>(null);
   const [companySearchQuery, setCompanySearchQuery] = useState('');
   const [companyStatusFilter, setCompanyStatusFilter] = useState<'ALL' | 'ACTIVE' | 'ATTENTION' | 'INACTIVE'>('ALL');
-  const [companyMenuId, setCompanyMenuId] = useState<string | null>(null);
-  const [companyMenuBoard, setCompanyMenuBoard] = useState(fixedBoard || 'Board A');
   const [isSavingCompany, setIsSavingCompany] = useState(false);
 
   const handleSendFollowUp = async (driverId: string) => {
@@ -318,14 +319,13 @@ export const DriverTable: React.FC<DriverTableProps> = ({
     setNewCompany({ name: '', board: fixedBoard || 'Board A' });
   };
 
-  const handleSaveCompany = async (companyId: string, companyName: string) => {
+  const handleSaveCompany = async (companyId: string, companyName: string, board: string) => {
     setIsSavingCompany(true);
     try {
       await onUpdateCompany(companyId, {
         name: companyName,
-        board: companyMenuBoard
+        board
       });
-      setCompanyMenuId(null);
     } catch (error: any) {
       alert(error?.message || 'Failed to update company.');
     } finally {
@@ -337,7 +337,6 @@ export const DriverTable: React.FC<DriverTableProps> = ({
     if (!window.confirm(`Delete ${companyName}?`)) return;
     try {
       await onDeleteCompany(companyId);
-      setCompanyMenuId(null);
       setSelectedCompanyName(null);
       setFilters.setCompanyFilter('ALL');
     } catch (error: any) {
@@ -351,11 +350,6 @@ export const DriverTable: React.FC<DriverTableProps> = ({
   useEffect(() => {
     setSelectedIds(new Set());
   }, [selectedCompanyName]);
-
-  useEffect(() => {
-    if (!selectedCompanySummary) return;
-    setCompanyMenuBoard(selectedCompanySummary.board || fixedBoard || 'Board A');
-  }, [fixedBoard, selectedCompanySummary]);
 
   return (
     <div className="space-y-4 relative">
@@ -549,51 +543,32 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                     <td className="px-6 py-4 text-sm font-semibold text-slate-900 dark:text-white">{company.totalDrivers}</td>
                     <td className="px-6 py-4 text-sm text-slate-700 dark:text-slate-300">{company.connectedCount}</td>
                     <td className="px-6 py-4">
-                      <div className="relative">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setCompanyMenuId((prev) => prev === company.id ? null : company.id);
-                            setCompanyMenuBoard(company.board);
-                          }}
-                          className="inline-flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-700 px-2.5 py-2 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
-                        >
+                      <DropdownMenu
+                        menuClassName="w-64"
+                        options={[
+                          ...boards.map((board) => ({
+                            label: company.board === board ? `Current Board: ${board}` : `Move to ${board}`,
+                            onClick: () => handleSaveCompany(company.id, company.name, board),
+                            Icon: company.board === board
+                              ? <CheckIcon className="h-4 w-4 text-emerald-300" />
+                              : <PenSquare className="h-4 w-4" />
+                          })),
+                          {
+                            label: isSavingCompany ? 'Saving...' : `Delete ${company.name}`,
+                            onClick: () => {
+                              if (!isSavingCompany) {
+                                void handleRemoveCompany(company.id, company.name);
+                              }
+                            },
+                            Icon: <Trash className="h-4 w-4 text-rose-300" />
+                          }
+                        ]}
+                      >
+                        <span className="inline-flex items-center gap-2">
                           <PenSquare className="w-4 h-4" />
-                        </button>
-
-                        {companyMenuId === company.id && (
-                          <div className="absolute right-0 top-12 z-20 w-56 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 shadow-xl">
-                            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">Reassign Board</p>
-                            <select
-                              value={companyMenuBoard}
-                              onChange={(e) => setCompanyMenuBoard(e.target.value)}
-                              className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
-                            >
-                              {boards.map((board) => (
-                                <option key={board} value={board}>{board}</option>
-                              ))}
-                            </select>
-
-                            <div className="mt-3 flex flex-col gap-2">
-                              <button
-                                type="button"
-                                onClick={() => handleSaveCompany(company.id, company.name)}
-                                disabled={isSavingCompany}
-                                className="w-full rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
-                              >
-                                {isSavingCompany ? 'Saving...' : 'Save Board'}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveCompany(company.id, company.name)}
-                                className="w-full rounded-lg bg-red-600 px-3 py-2 text-sm font-bold text-white hover:bg-red-700"
-                              >
-                                Delete Company
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
+                          Actions
+                        </span>
+                      </DropdownMenu>
                     </td>
                   </tr>
                 ))}
