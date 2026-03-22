@@ -52,6 +52,8 @@ if (smtpHost && smtpUser && smtpPass) {
 }
 
 const FROM = process.env.SMTP_FROM || '"Leader A1 Fleet System" <noreply@leadera1.com>';
+const RESEND_API_KEY = String(process.env.RESEND_API_KEY || '').trim();
+const RESEND_FROM = String(process.env.RESEND_FROM || process.env.SMTP_FROM || '').trim();
 
 const sendViaFallback = async (mailOptions: any): Promise<SendResult> => {
     let lastError = '';
@@ -67,6 +69,61 @@ const sendViaFallback = async (mailOptions: any): Promise<SendResult> => {
         }
     }
     return { ok: false, error: lastError || 'Unknown email error' };
+};
+
+const sendViaResend = async (
+    to: string[],
+    subject: string,
+    html: string,
+    attachments: Attachment[] = []
+): Promise<SendResult> => {
+    if (!RESEND_API_KEY || !RESEND_FROM) {
+        return { ok: false, error: 'Resend fallback is not configured (RESEND_API_KEY/RESEND_FROM missing).' };
+    }
+    try {
+        const payload: any = {
+            from: RESEND_FROM,
+            to,
+            subject,
+            html
+        };
+
+        // Resend expects base64 "content" for attachments.
+        if (attachments.length > 0) {
+            const mapped = [];
+            for (const file of attachments) {
+                try {
+                    const fs = await import('fs');
+                    const b64 = fs.readFileSync(file.path).toString('base64');
+                    mapped.push({
+                        filename: file.filename,
+                        content: b64
+                    });
+                } catch (e: any) {
+                    console.warn(`[EMAIL] Failed to read attachment for Resend (${file.path}):`, e?.message || e);
+                }
+            }
+            if (mapped.length > 0) payload.attachments = mapped;
+        }
+
+        const response = await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${RESEND_API_KEY}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            const text = await response.text().catch(() => '');
+            return { ok: false, error: `Resend HTTP ${response.status}: ${text}` };
+        }
+
+        return { ok: true };
+    } catch (e: any) {
+        return { ok: false, error: e?.message || 'Resend fallback failed.' };
+    }
 };
 
 export const sendReminderEmail = async (to: string, driverName: string, days: number): Promise<boolean> => {
@@ -86,7 +143,10 @@ export const sendReminderEmail = async (to: string, driverName: string, days: nu
                 </div>
             `
         };
-        const result = await sendViaFallback(mailOptions);
+        let result = await sendViaFallback(mailOptions);
+        if (!result.ok) {
+            result = await sendViaResend([to], mailOptions.subject, mailOptions.html);
+        }
         if (!result.ok) throw new Error(result.error);
         console.log(`[EMAIL] ${days}-day reminder sent to ${to}`);
         return true;
@@ -113,7 +173,10 @@ export const sendDisconnectionEmail = async (to: string, driverName: string): Pr
                 </div>
             `
         };
-        const result = await sendViaFallback(mailOptions);
+        let result = await sendViaFallback(mailOptions);
+        if (!result.ok) {
+            result = await sendViaResend([to], mailOptions.subject, mailOptions.html);
+        }
         if (!result.ok) throw new Error(result.error);
         console.log(`[EMAIL] Disconnection alert sent to ${to}`);
         return true;
@@ -141,9 +204,13 @@ export const sendCustomBroadcastEmail = async (
             html: htmlContent,
             attachments
         };
-        const result = await sendViaFallback(mailOptions);
+        let result = await sendViaFallback(mailOptions);
         if (!result.ok) {
-            return { ok: false, error: result.error || 'SMTP send failed.' };
+            const resendResult = await sendViaResend(to, subject, htmlContent, attachments);
+            result = resendResult.ok ? resendResult : { ok: false, error: `${result.error || 'SMTP send failed.'} | ${resendResult.error || 'Resend failed.'}` };
+        }
+        if (!result.ok) {
+            return { ok: false, error: result.error };
         }
         console.log(`[EMAIL] Broadcast sent to ${to.length} recipients`);
         return { ok: true };
