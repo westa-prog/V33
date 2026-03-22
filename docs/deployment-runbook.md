@@ -16,6 +16,7 @@ Run migrations in order:
 1. `supabase/migrations/0001_app_core.sql`
 2. `supabase/migrations/0002_ai_assistant.sql`
 3. `supabase/migrations/0003_tenant_rls_hardening.sql`
+4. `supabase/migrations/0004_normalized_board_company_model.sql`
 
 Verify tables exist:
 
