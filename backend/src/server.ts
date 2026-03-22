@@ -256,6 +256,72 @@ app.patch('/api/admin/users/:userId', async (req, res) => {
     }
 });
 
+app.post('/api/admin/repair-users', async (req, res) => {
+    try {
+        const { admin_id, default_boards } = req.body || {};
+        const normalizedAdminId = String(admin_id || '').trim();
+        const normalizedBoards = normalizeList(default_boards);
+
+        if (!isUuid(normalizedAdminId)) {
+            res.status(400).json({ error: 'A valid admin_id is required.' });
+            return;
+        }
+        if (normalizedBoards.length === 0) {
+            res.status(400).json({ error: 'At least one default board is required.' });
+            return;
+        }
+        if (normalizedBoards.some((board) => !ALLOWED_BOARDS.has(board))) {
+            res.status(400).json({ error: 'Only Board A, Board B, or Board C are allowed.' });
+            return;
+        }
+
+        const supabase = getDb();
+        const { data: candidates, error: candidateError } = await supabase
+            .from('profiles')
+            .select('id, email, role, admin_id, assigned_boards')
+            .ilike('email', '%@v33.local')
+            .or('admin_id.is.null,assigned_boards.is.null,role.is.null');
+
+        if (candidateError) {
+            res.status(500).json({ error: candidateError.message });
+            return;
+        }
+
+        const list = candidates || [];
+        let repaired = 0;
+        const repairedIds: string[] = [];
+
+        for (const row of list) {
+            const currentBoards = Array.isArray(row.assigned_boards) ? row.assigned_boards.filter(Boolean) : [];
+            const needsAdmin = !row.admin_id;
+            const needsRole = !row.role || row.role !== 'employee';
+            const needsBoards = currentBoards.length === 0;
+            if (!needsAdmin && !needsRole && !needsBoards) continue;
+
+            const { error: updateError } = await supabase
+                .from('profiles')
+                .update({
+                    admin_id: row.admin_id || normalizedAdminId,
+                    role: 'employee',
+                    assigned_boards: needsBoards ? normalizedBoards : currentBoards
+                })
+                .eq('id', row.id);
+
+            if (!updateError) {
+                repaired += 1;
+                repairedIds.push(row.id);
+            } else {
+                console.error(`[API] Failed to repair legacy profile ${row.id}:`, updateError);
+            }
+        }
+
+        res.json({ success: true, repaired, repairedIds });
+    } catch (e: any) {
+        console.error('[API] Admin repair-users failed:', e);
+        res.status(500).json({ error: e.message || 'Failed to repair users.' });
+    }
+});
+
 app.post('/api/drivers/create', async (req, res) => {
     try {
         const { acting_user_id, name, email, company, board, deviceType, appVersion, eldStatus, dutyStatus, followUp } = req.body || {};

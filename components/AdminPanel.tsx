@@ -22,6 +22,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
   }>>([]);
   const [employeesLoading, setEmployeesLoading] = useState(false);
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
+  const [repairBoards, setRepairBoards] = useState<string[]>(['Board A']);
+  const [repairing, setRepairing] = useState(false);
   
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'error' | 'success', text: string } | null>(null);
@@ -147,6 +149,39 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
     }
   };
 
+  const toggleRepairBoard = (board: string) => {
+    setRepairBoards(prev => prev.includes(board) ? prev.filter(b => b !== board) : [...prev, board]);
+  };
+
+  const handleRepairLegacyUsers = async () => {
+    if (!currentUser.uid) return;
+    if (repairBoards.length === 0) {
+      setMessage({ type: 'error', text: 'Select at least one board for repair defaults.' });
+      return;
+    }
+    setRepairing(true);
+    setMessage(null);
+    try {
+      const endpoint = apiUrl('/api/admin/repair-users');
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          admin_id: currentUser.uid,
+          default_boards: repairBoards
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+      setMessage({ type: 'success', text: `Legacy repair completed. Repaired ${data?.repaired ?? 0} user(s).` });
+      await loadEmployees();
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Legacy repair failed.' });
+    } finally {
+      setRepairing(false);
+    }
+  };
+
   return (
     <div className="max-w-2xl mx-auto mt-8">
        <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 p-8">
@@ -225,6 +260,36 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
            </form>
 
            <div className="mt-10 border-t border-slate-200 dark:border-slate-800 pt-8">
+             <div className="mb-6 p-4 border border-amber-200 dark:border-amber-800 rounded-xl bg-amber-50 dark:bg-amber-900/20">
+               <p className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-2">Repair Legacy Employees</p>
+               <p className="text-xs text-amber-700 dark:text-amber-400 mb-3">
+                 Use this once to repair old employee profiles created before the mapping fix.
+               </p>
+               <div className="grid grid-cols-3 gap-2 mb-3">
+                 {boardOptions.map(board => {
+                   const isSelected = repairBoards.includes(board);
+                   return (
+                     <button
+                       key={`repair-${board}`}
+                       type="button"
+                       onClick={() => toggleRepairBoard(board)}
+                       className={`px-3 py-2 rounded-lg text-xs font-semibold border ${isSelected ? 'bg-amber-600 text-white border-amber-600' : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-700'}`}
+                     >
+                       {board}
+                     </button>
+                   );
+                 })}
+               </div>
+               <button
+                 type="button"
+                 onClick={handleRepairLegacyUsers}
+                 disabled={repairing}
+                 className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold disabled:opacity-50"
+               >
+                 {repairing ? 'Repairing...' : 'Repair Legacy Users'}
+               </button>
+             </div>
+
              <div className="flex items-center justify-between mb-4">
                <h3 className="text-lg font-bold text-slate-800 dark:text-white">Existing Employees</h3>
                <button
