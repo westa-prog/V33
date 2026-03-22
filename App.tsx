@@ -331,7 +331,6 @@ const App: React.FC = () => {
         assignedCompanies: Array.isArray(sessionUser.user_metadata?.assigned_companies)
           ? sessionUser.user_metadata.assigned_companies
           : (sessionUser.user_metadata?.assigned_company ? [sessionUser.user_metadata.assigned_company] : prev?.assignedCompanies),
-        landingHtml: (sessionUser.user_metadata?.landing_html as string) || prev?.landingHtml,
         emailTemplate: (sessionUser.user_metadata?.email_template as string) || prev?.emailTemplate,
         emailTemplates: typeof sessionUser.user_metadata?.email_templates === 'object' && sessionUser.user_metadata?.email_templates
           ? (sessionUser.user_metadata.email_templates as EmailTemplateMap)
@@ -364,7 +363,6 @@ const App: React.FC = () => {
         assignedCompanies: Array.isArray(sessionUser.user_metadata?.assigned_companies)
           ? sessionUser.user_metadata.assigned_companies
           : (sessionUser.user_metadata?.assigned_company ? [sessionUser.user_metadata.assigned_company] : prev?.assignedCompanies),
-        landingHtml: (sessionUser.user_metadata?.landing_html as string) || prev?.landingHtml,
         emailTemplate: (sessionUser.user_metadata?.email_template as string) || prev?.emailTemplate,
         emailTemplates: typeof sessionUser.user_metadata?.email_templates === 'object' && sessionUser.user_metadata?.email_templates
           ? (sessionUser.user_metadata.email_templates as EmailTemplateMap)
@@ -1068,7 +1066,7 @@ const App: React.FC = () => {
           )}
         </header>
 
-        {activeTab === 'Dashboard' && <Dashboard drivers={filteredDrivers} assignedBoard={isAdminUser ? undefined : authUser?.assignedBoard} landingHtml={authUser?.landingHtml} employeeName={isAdminUser ? undefined : authUser?.name} />}
+        {activeTab === 'Dashboard' && <Dashboard drivers={filteredDrivers} assignedBoard={isAdminUser ? undefined : authUser?.assignedBoard} employeeName={isAdminUser ? undefined : authUser?.name} />}
 
         {activeTab === 'Connection' && (
           <div className="space-y-8">

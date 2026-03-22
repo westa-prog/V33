@@ -20,7 +20,6 @@ type EmployeeRecord = {
   assigned_boards?: string[];
   status?: 'pending' | 'active';
   claimed_user_id?: string | null;
-  landing_html?: string;
   email_template?: string;
   email_templates?: EmailTemplateMap;
 };
@@ -33,7 +32,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ currentUser, isAdm
   const [employees, setEmployees] = useState<EmployeeRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
-  const [landingHtml, setLandingHtml] = useState('');
   const [emailTemplatesDraft, setEmailTemplatesDraft] = useState<EmailTemplateMap>({
     connection_driving: '',
     connection_onduty: '',
@@ -346,7 +344,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ currentUser, isAdm
   }, [isAdmin, currentUser.uid]);
 
   useEffect(() => {
-    setLandingHtml(selectedEmployee?.landing_html || '');
     const metaTemplates = selectedEmployee?.email_templates || {};
     setEmailTemplatesDraft({
       connection_driving: metaTemplates.connection_driving || '',
@@ -354,7 +351,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ currentUser, isAdm
       pf_3_day: metaTemplates.pf_3_day || '',
       pf_5_day: metaTemplates.pf_5_day || ''
     });
-  }, [selectedEmployeeId, selectedEmployee?.landing_html, selectedEmployee?.email_template, selectedEmployee?.email_templates]);
+  }, [selectedEmployeeId, selectedEmployee?.email_template, selectedEmployee?.email_templates]);
 
   const savePersonalization = async () => {
     if (!isAdmin || !currentUser.uid || !selectedEmployeeId) return;
@@ -372,7 +369,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ currentUser, isAdm
           admin_id: currentUser.uid,
           assigned_boards: selectedEmployee?.assigned_boards || [],
           assigned_companies: [],
-          landing_html: landingHtml,
           email_template: emailTemplatesDraft.connection_onduty || selectedEmployee?.email_template || '',
           email_templates: emailTemplatesDraft
         })
@@ -532,17 +528,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ currentUser, isAdm
                     This assignment is still pending. The user must sign in once before landing pages and templates can be saved.
                   </p>
                 )}
-
-                <div>
-                  <label className="text-xs font-semibold text-slate-500">Landing HTML</label>
-                  <textarea
-                    value={landingHtml}
-                    onChange={(e) => setLandingHtml(e.target.value)}
-                    rows={8}
-                    className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-xs"
-                    placeholder="<html>...</html>"
-                  />
-                </div>
 
                 <div>
                   <label className="text-xs font-semibold text-slate-500">Email Template Menu</label>

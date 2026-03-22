@@ -10,50 +10,10 @@ import { ParticleTextEffect } from './ui/particle-text-effect';
 interface DashboardProps {
     drivers: Driver[];
     assignedBoard?: string;
-    landingHtml?: string;
     employeeName?: string;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, landingHtml, employeeName }) => {
-    if (landingHtml && landingHtml.trim()) {
-        return (
-            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
-                <iframe
-                    title="Personalized Landing"
-                    srcDoc={landingHtml}
-                    className="w-full min-h-[80vh] bg-white"
-                    sandbox="allow-same-origin allow-popups allow-forms allow-scripts"
-                />
-            </div>
-        );
-    }
-    if (assignedBoard && employeeName) {
-        return (
-            <div className="space-y-6">
-                <ParticleTextEffect
-                    words={[employeeName.toUpperCase(), assignedBoard.toUpperCase()]}
-                    subtitle={`Welcome back, ${employeeName}. You are working inside ${assignedBoard}.`}
-                />
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="bg-white/90 dark:bg-slate-900/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
-                        <p className="text-xs font-black uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Assigned Board</p>
-                        <p className="mt-3 text-3xl font-black text-slate-900 dark:text-white">{assignedBoard}</p>
-                    </div>
-                    <div className="bg-white/90 dark:bg-slate-900/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
-                        <p className="text-xs font-black uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Visible Drivers</p>
-                        <p className="mt-3 text-3xl font-black text-slate-900 dark:text-white">{drivers.length}</p>
-                    </div>
-                    <div className="bg-white/90 dark:bg-slate-900/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
-                        <p className="text-xs font-black uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Connected</p>
-                        <p className="mt-3 text-3xl font-black text-emerald-600 dark:text-emerald-400">
-                            {drivers.filter((d) => d.eldStatus === ELDStatus.CONNECTED).length}
-                        </p>
-                    </div>
-                </div>
-            </div>
-        );
-    }
+export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, employeeName }) => {
     const rawApiBaseUrl = ((import.meta as any).env.VITE_API_URL || '').trim();
     const apiBaseUrl = rawApiBaseUrl.replace(/\/+$/, '');
     const isBrowser = typeof window !== 'undefined';
@@ -85,6 +45,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, la
     const totalDrivers = filteredDrivers.length;
     const activeDrivers = filteredDrivers.filter(d => d.eldStatus === ELDStatus.CONNECTED).length;
     const inactiveDrivers = filteredDrivers.filter(d => d.eldStatus === ELDStatus.DISCONNECTED).length;
+    const boardViolations = filteredDrivers.filter(
+        (d) => d.eldStatus === ELDStatus.DISCONNECTED && ['Driving', 'On Duty'].includes(d.dutyStatus || '')
+    ).length;
+    const motivationalCopy = [
+        "Small improvements compound into reliable operations.",
+        "Consistency beats intensity in fleet performance.",
+        "Clear updates keep your board moving."
+    ];
 
     const connectionStats = useMemo(() => {
         return [
@@ -133,6 +101,48 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, la
 
     return (
         <div className="space-y-6 animate-in fade-in zoom-in-95 duration-200">
+            {assignedBoard && employeeName && (
+                <section className="space-y-6">
+                    <ParticleTextEffect
+                        words={[employeeName.toUpperCase(), assignedBoard.toUpperCase(), 'WELCOME']}
+                        subtitle={`Welcome back, ${employeeName}. Stay focused, keep ${assignedBoard} moving, and scroll to manage your board.`}
+                    />
+
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div className="bg-white/90 dark:bg-slate-900/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
+                            <p className="text-xs font-black uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Assigned Board</p>
+                            <p className="mt-3 text-3xl font-black text-slate-900 dark:text-white">{assignedBoard}</p>
+                        </div>
+                        <div className="bg-white/90 dark:bg-slate-900/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
+                            <p className="text-xs font-black uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Drivers</p>
+                            <p className="mt-3 text-3xl font-black text-slate-900 dark:text-white">{filteredDrivers.length}</p>
+                        </div>
+                        <div className="bg-white/90 dark:bg-slate-900/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
+                            <p className="text-xs font-black uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Connected</p>
+                            <p className="mt-3 text-3xl font-black text-emerald-600 dark:text-emerald-400">{activeDrivers}</p>
+                        </div>
+                        <div className="bg-white/90 dark:bg-slate-900/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
+                            <p className="text-xs font-black uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Attention Needed</p>
+                            <p className="mt-3 text-3xl font-black text-amber-600 dark:text-amber-400">{boardViolations}</p>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {motivationalCopy.map((line) => (
+                            <div key={line} className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white/85 dark:bg-slate-900/70 p-5 shadow-sm">
+                                <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{line}</p>
+                            </div>
+                        ))}
+                    </div>
+
+                    <div className="flex items-center justify-center">
+                        <div className="rounded-full border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/70 px-4 py-2 text-xs font-black uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                            Scroll down to continue into your dashboard
+                        </div>
+                    </div>
+                </section>
+            )}
+
             <div className="flex justify-between items-center bg-white dark:bg-slate-900 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800">
                 <div>
                     <h2 className="text-xl font-bold text-slate-900 dark:text-white">Connection Dashboard</h2>
