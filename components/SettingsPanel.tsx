@@ -18,6 +18,8 @@ type EmployeeRecord = {
   email: string;
   name?: string;
   assigned_boards?: string[];
+  status?: 'pending' | 'active';
+  claimed_user_id?: string | null;
   landing_html?: string;
   email_template?: string;
   email_templates?: EmailTemplateMap;
@@ -324,10 +326,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ currentUser, isAdm
     if (!isAdmin || !currentUser.uid) return;
     setLoading(true);
     try {
-      const res = await fetch(apiUrl(`/api/admin/users?admin_id=${encodeURIComponent(currentUser.uid)}`));
+      const res = await fetch(apiUrl(`/api/admin/assignments?admin_id=${encodeURIComponent(currentUser.uid)}`));
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
-      const users: EmployeeRecord[] = data?.users || [];
+      const users: EmployeeRecord[] = data?.assignments || [];
       setEmployees(users);
       if (!selectedEmployeeId && users.length > 0) {
         setSelectedEmployeeId(users[0].id);
@@ -356,10 +358,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ currentUser, isAdm
 
   const savePersonalization = async () => {
     if (!isAdmin || !currentUser.uid || !selectedEmployeeId) return;
+    if (!selectedEmployee?.claimed_user_id) {
+      setMessage('This user has not joined yet. Personalization becomes available after first sign-in.');
+      return;
+    }
     setSaving(true);
     setMessage('');
     try {
-      const res = await fetch(apiUrl(`/api/admin/users/${selectedEmployeeId}`), {
+      const res = await fetch(apiUrl(`/api/admin/assignments/${selectedEmployeeId}`), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -516,10 +522,16 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ currentUser, isAdm
                   <option value="">Select employee</option>
                   {employees.map((u) => (
                     <option key={u.id} value={u.id}>
-                      {u.name || u.email} ({u.email})
+                      {u.name || u.email} ({u.email}){u.status === 'pending' ? ' - Pending' : ''}
                     </option>
                   ))}
                 </select>
+
+                {selectedEmployee && !selectedEmployee.claimed_user_id && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    This assignment is still pending. The user must sign in once before landing pages and templates can be saved.
+                  </p>
+                )}
 
                 <div>
                   <label className="text-xs font-semibold text-slate-500">Landing HTML</label>
@@ -562,7 +574,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ currentUser, isAdm
                 <button
                   type="button"
                   onClick={savePersonalization}
-                  disabled={saving || !selectedEmployeeId}
+                  disabled={saving || !selectedEmployeeId || !selectedEmployee?.claimed_user_id}
                   className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold disabled:opacity-50"
                 >
                   {saving ? 'Saving...' : 'Save Personalization'}

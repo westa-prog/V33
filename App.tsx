@@ -413,16 +413,14 @@ const App: React.FC = () => {
         const activeEmail = user?.email || authUser?.email || '';
         const activeName = user?.name || authUser?.name || '';
         await initializeUserDatabase(activeUserId, activeEmail, activeName);
-        if (isAdminUser) {
-          try {
-            await fetch(apiUrl('/api/auth/ensure-profile'), {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ user_id: activeUserId })
-            });
-          } catch (err) {
-            console.warn('Failed to ensure admin profile role:', err);
-          }
+        try {
+          await fetch(apiUrl('/api/auth/ensure-profile'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: activeUserId })
+          });
+        } catch (err) {
+          console.warn('Failed to ensure user profile assignments:', err);
         }
         const profile = await fetchUserProfile(activeUserId);
 
@@ -514,10 +512,14 @@ const App: React.FC = () => {
   }, [activeUserId, driverOwnerUserId, authUser?.email, authUser?.name, authUser?.assignedBoard, isAdminUser, user?.accessToken, user?.email, user?.name]);
 
   useEffect(() => {
+    if (isAdminUser) {
+      setBoardFilter('ALL');
+      return;
+    }
     if (authUser?.assignedBoard) {
       setBoardFilter(normalizeBoard(authUser.assignedBoard));
     }
-  }, [authUser?.assignedBoard]);
+  }, [authUser?.assignedBoard, isAdminUser]);
 
   // DEBUG CLI: Access via Browser Console
   useEffect(() => {
@@ -587,7 +589,12 @@ const App: React.FC = () => {
       const matchesEld = eldFilter === 'ALL' || driver.eldStatus === eldFilter;
       const matchesDuty = dutyFilter === 'ALL' || driver.dutyStatus === dutyFilter;
       const matchesCompany = companyFilter === 'ALL' || driver.company === companyFilter;
-      
+
+      if (isAdminUser) {
+        const matchesBoard = boardFilter === 'ALL' || normalizeBoard(driver.board) === normalizeBoard(boardFilter);
+        return matchesName && matchesEld && matchesDuty && matchesCompany && matchesBoard;
+      }
+
       const allowedBoards = normalizeBoardList(authUser?.assignedBoards || (authUser?.assignedBoard ? [authUser.assignedBoard] : []));
       const allowedCompanies = authUser?.assignedCompanies || [];
       const matchesBoard = allowedBoards.length > 0
@@ -599,7 +606,7 @@ const App: React.FC = () => {
 
       return matchesName && matchesEld && matchesDuty && matchesCompany && matchesBoard && matchesAssignedCompany;
     });
-  }, [drivers, searchQuery, eldFilter, dutyFilter, companyFilter, boardFilter, authUser]);
+  }, [drivers, searchQuery, eldFilter, dutyFilter, companyFilter, boardFilter, authUser, isAdminUser]);
 
   const stats = useMemo(() => {
     const violations = filteredDrivers.filter(d => d.eldStatus === ELDStatus.DISCONNECTED && [DutyStatus.DRIVING, DutyStatus.ON_DUTY].includes(d.dutyStatus)).length;
@@ -1031,7 +1038,7 @@ const App: React.FC = () => {
           )}
         </header>
 
-        {activeTab === 'Dashboard' && <Dashboard drivers={filteredDrivers} assignedBoard={authUser?.assignedBoard} landingHtml={authUser?.landingHtml} />}
+        {activeTab === 'Dashboard' && <Dashboard drivers={filteredDrivers} assignedBoard={isAdminUser ? undefined : authUser?.assignedBoard} landingHtml={authUser?.landingHtml} />}
 
         {activeTab === 'Connection' && (
           <div className="space-y-8">
@@ -1053,7 +1060,7 @@ const App: React.FC = () => {
                 onManualSendEmail={handleManualSendEmail}
                 onResetDriver={handleResetDriver}
                 isAdmin={isAdminUser}
-                fixedBoard={authUser?.assignedBoard}
+                fixedBoard={isAdminUser ? undefined : authUser?.assignedBoard}
               />
             </div>
           </div>
@@ -1061,7 +1068,7 @@ const App: React.FC = () => {
 
         {activeTab === 'Profile Form' && <ProfileForm drivers={filteredDrivers} emailLogs={emailLogs} onSendReminder={handleProfileFormReminder} onUpdatePFDate={handleUpdatePFDate} />}
         {activeTab === 'AI Assistant' && <AIAssistant userId={authUser?.uid} />}
-        {activeTab === 'Broadcast' && <EmailBroadcast drivers={filteredDrivers} assignedBoard={authUser?.assignedBoard} userId={activeUserId} userAccessToken={user?.accessToken} />}
+        {activeTab === 'Broadcast' && <EmailBroadcast drivers={filteredDrivers} assignedBoard={isAdminUser ? undefined : authUser?.assignedBoard} userId={activeUserId} userAccessToken={user?.accessToken} />}
         {activeTab === 'Activity' && isAdminUser && (
           <div className="space-y-4">
             {emailLogs

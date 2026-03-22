@@ -98,23 +98,122 @@ const readUserMetadata = (user: any) => {
         assigned_companies: pickMetadataList(meta.assigned_companies || meta.assigned_company)
     };
 };
+const normalizeEmail = (value: unknown) => String(value || '').trim().toLowerCase();
 const isProfileSchemaMismatch = (message: string) => {
     return /assigned_boards|assigned_board|assigned_companies|admin_id|board_id|company_id/i.test(message || '');
+};
+const isMissingEmployeeAssignmentsTable = (message: string) => {
+    return /employee_assignments|relation .* does not exist|Could not find the table/i.test(message || '');
+};
+
+const upsertProfileAssignments = async (
+    supabase: ReturnType<typeof getDb>,
+    payload: {
+        id: string;
+        email: string;
+        name: string;
+        role: string;
+        admin_id?: string | null;
+        assigned_boards?: string[];
+        assigned_companies?: string[];
+    }
+) => {
+    const primaryBoardId = boardNameToId(payload.assigned_boards?.[0] || null);
+    let { error } = await supabase.from('profiles').upsert({
+        id: payload.id,
+        email: payload.email,
+        name: payload.name,
+        admin_id: payload.admin_id || null,
+        role: payload.role,
+        assigned_boards: payload.assigned_boards || [],
+        assigned_companies: payload.assigned_companies || [],
+        board_id: primaryBoardId
+    }, { onConflict: 'id' });
+
+    if (error && isProfileSchemaMismatch(String(error.message || ''))) {
+        const legacyPayload: any = {
+            id: payload.id,
+            email: payload.email,
+            name: payload.name,
+            admin_id: payload.admin_id || null,
+            role: payload.role,
+            assigned_board: payload.assigned_boards?.[0] || null
+        };
+        if ((payload.assigned_companies || []).length > 0) {
+            legacyPayload.assigned_company = payload.assigned_companies?.[0] || null;
+        }
+        const legacyRes = await supabase.from('profiles').upsert(legacyPayload, { onConflict: 'id' });
+        error = legacyRes.error || null;
+    }
+
+    return error || null;
+};
+
+const syncUserAccess = async (
+    supabase: ReturnType<typeof getDb>,
+    user: any,
+    access: {
+        role: string;
+        admin_id?: string | null;
+        assigned_boards?: string[];
+        assigned_companies?: string[];
+        landing_html?: string;
+        email_template?: string;
+        email_templates?: Record<string, unknown>;
+    }
+) => {
+    const email = normalizeEmail(user?.email);
+    const fullName = String(user?.user_metadata?.full_name || email.split('@')[0] || 'User');
+    const currentMeta = user?.user_metadata || {};
+
+    const profileError = await upsertProfileAssignments(supabase, {
+        id: user.id,
+        email,
+        name: fullName,
+        role: access.role,
+        admin_id: access.admin_id || null,
+        assigned_boards: access.assigned_boards || [],
+        assigned_companies: access.assigned_companies || []
+    });
+    if (profileError && !isProfileSchemaMismatch(String(profileError.message || ''))) {
+        throw profileError;
+    }
+
+    const { error: metadataError } = await supabase.auth.admin.updateUserById(user.id, {
+        user_metadata: {
+            ...currentMeta,
+            role: access.role,
+            admin_id: access.admin_id || null,
+            assigned_boards: access.assigned_boards || [],
+            assigned_companies: access.assigned_companies || [],
+            landing_html: typeof access.landing_html === 'string' ? access.landing_html : (currentMeta.landing_html || ''),
+            email_template: typeof access.email_template === 'string' ? access.email_template : (currentMeta.email_template || ''),
+            email_templates: access.email_templates && typeof access.email_templates === 'object'
+                ? access.email_templates
+                : (currentMeta.email_templates || {})
+        }
+    });
+    if (metadataError) throw metadataError;
+};
+
+const findAuthUserByEmail = async (supabase: ReturnType<typeof getDb>, email: string) => {
+    const normalizedEmail = normalizeEmail(email);
+    let page = 1;
+    while (page <= 20) {
+        const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 200 });
+        if (error) throw error;
+        const match = (data?.users || []).find((user) => normalizeEmail(user.email) === normalizedEmail);
+        if (match) return match;
+        if ((data?.users || []).length < 200) break;
+        page += 1;
+    }
+    return null;
 };
 
 const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 const ALLOWED_BOARDS = new Set(['Board A', 'Board B', 'Board C']);
 const ADMIN_EMAIL = 'westa@algogroup.us';
-const LEGACY_PSEUDO_EMAIL_DOMAIN = 'v33.local';
-const PSEUDO_EMAIL_DOMAIN = String(process.env.PSEUDO_EMAIL_DOMAIN || 'dilshod.algo')
-    .trim()
-    .toLowerCase()
-    .replace(/^@+/, '') || 'dilshod.algo';
-const isPseudoEmployeeEmail = (email: unknown) => {
-    const value = String(email || '').trim().toLowerCase();
-    return value.endsWith(`@${PSEUDO_EMAIL_DOMAIN}`) || value.endsWith(`@${LEGACY_PSEUDO_EMAIL_DOMAIN}`);
-};
 
 const cleanupUploads = (files: Express.Multer.File[] = []) => {
     for (const file of files) {
@@ -211,163 +310,163 @@ app.post('/api/auth/ensure-profile', async (req, res) => {
             return;
         }
 
-        const email = String(userData.user.email || '').toLowerCase();
+        const email = normalizeEmail(userData.user.email);
         const fullName = String(userData.user.user_metadata?.full_name || email.split('@')[0] || 'User');
         const isAdmin = email === ADMIN_EMAIL;
-        const role = isAdmin ? 'admin' : (String(userData.user.user_metadata?.role || 'employee'));
+        let assignment: any = null;
+        if (!isAdmin) {
+            const { data: assignmentData, error: assignmentError } = await supabase
+                .from('employee_assignments')
+                .select('*')
+                .eq('email', email)
+                .maybeSingle();
+            if (assignmentError && !isMissingEmployeeAssignmentsTable(String(assignmentError.message || ''))) {
+                res.status(500).json({ error: assignmentError.message });
+                return;
+            }
+            assignment = assignmentData || null;
+        }
 
-        const { error: upsertError } = await supabase
-            .from('profiles')
-            .upsert({
-                id: userId,
-                email,
-                name: fullName,
-                role
-            }, { onConflict: 'id' });
+        if (isAdmin) {
+            await syncUserAccess(supabase, userData.user, {
+                role: 'admin',
+                assigned_boards: [],
+                assigned_companies: []
+            });
+            res.json({ success: true, role: 'admin' });
+            return;
+        }
+
+        if (assignment) {
+            await syncUserAccess(supabase, userData.user, {
+                role: 'employee',
+                admin_id: assignment.admin_id,
+                assigned_boards: normalizeList(assignment.assigned_boards).map(normalizeBoardName).filter(Boolean),
+                assigned_companies: normalizeList(assignment.assigned_companies)
+            });
+
+            await supabase
+                .from('employee_assignments')
+                .update({
+                    name: fullName || assignment.name,
+                    claimed_user_id: userId,
+                    status: 'active',
+                    joined_at: assignment.joined_at || new Date().toISOString()
+                })
+                .eq('id', assignment.id);
+
+            res.json({
+                success: true,
+                role: 'employee',
+                admin_id: assignment.admin_id,
+                assigned_boards: normalizeList(assignment.assigned_boards).map(normalizeBoardName).filter(Boolean)
+            });
+            return;
+        }
+
+        const upsertError = await upsertProfileAssignments(supabase, {
+            id: userId,
+            email,
+            name: fullName,
+            role: String(userData.user.user_metadata?.role || 'user'),
+            admin_id: String(userData.user.user_metadata?.admin_id || '') || null,
+            assigned_boards: pickMetadataList(userData.user.user_metadata?.assigned_boards || userData.user.user_metadata?.assigned_board)
+                .map(normalizeBoardName)
+                .filter(Boolean),
+            assigned_companies: pickMetadataList(userData.user.user_metadata?.assigned_companies || userData.user.user_metadata?.assigned_company)
+        });
 
         if (upsertError && !isProfileSchemaMismatch(String(upsertError.message || ''))) {
             res.status(500).json({ error: upsertError.message });
             return;
         }
 
-        res.json({ success: true, role });
+        res.json({ success: true, role: String(userData.user.user_metadata?.role || 'user') });
     } catch (e: any) {
         console.error('[API] Ensure profile failed:', e);
+        if (isMissingEmployeeAssignmentsTable(String(e?.message || ''))) {
+            res.status(500).json({ error: 'Missing Supabase migration: run supabase/migrations/0007_employee_assignments.sql and redeploy Render.' });
+            return;
+        }
         res.status(500).json({ error: e.message || 'Failed to ensure profile.' });
     }
 });
 
-app.post('/api/admin/create-user', async (req, res) => {
+app.post('/api/admin/assign-user', async (req, res) => {
     try {
-        const { username, password, admin_id, admin_email, assigned_boards, assigned_companies } = req.body;
-
-        if (!username || !password || !admin_id || !admin_email) {
-            res.status(400).json({ error: 'Missing required fields' });
-            return;
-        }
-
-        const normalizedUsername = String(username).trim();
-        const normalizedPassword = String(password);
-        const normalizedAdminEmail = String(admin_email).trim().toLowerCase();
+        const { email, name, admin_id, assigned_boards, assigned_companies } = req.body || {};
+        const normalizedEmail = normalizeEmail(email);
+        const normalizedName = String(name || '').trim();
+        const normalizedAdminId = String(admin_id || '').trim();
         const normalizedBoards = normalizeList(assigned_boards).map(normalizeBoardName).filter(Boolean);
         const normalizedCompanies = normalizeList(assigned_companies);
-        const primaryBoardId = boardNameToId(normalizedBoards[0] || null);
 
-        if (normalizedUsername.length < 3) {
-            res.status(400).json({ error: 'Username must be at least 3 characters.' });
+        if (!isValidEmail(normalizedEmail)) {
+            res.status(400).json({ error: 'A valid employee email is required.' });
             return;
         }
-
-        if (normalizedPassword.length < 8) {
-            res.status(400).json({ error: 'Password must be at least 8 characters.' });
-            return;
-        }
-
-        if (!isValidEmail(normalizedAdminEmail)) {
-            res.status(400).json({ error: 'A valid admin email is required.' });
-            return;
-        }
-
-        if (!isUuid(String(admin_id))) {
+        if (!isUuid(normalizedAdminId)) {
             res.status(400).json({ error: 'A valid admin_id is required.' });
             return;
         }
-
         if (normalizedBoards.some((board) => !ALLOWED_BOARDS.has(board))) {
             res.status(400).json({ error: 'Only Board A, Board B, or Board C are allowed.' });
             return;
         }
 
         const supabase = getDb();
-        const usernameSlug = normalizedUsername.toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.+|\.+$/g, '');
-        const pseudoEmail = `${usernameSlug || 'employee'}@${PSEUDO_EMAIL_DOMAIN}`;
+        const authUser = await findAuthUserByEmail(supabase, normalizedEmail);
+        const status = authUser ? 'active' : 'pending';
 
-        const { data, error } = await supabase.auth.admin.createUser({
-            email: pseudoEmail,
-            password: normalizedPassword,
-            email_confirm: true,
-            user_metadata: {
-                full_name: normalizedUsername,
+        const { data: assignment, error: assignmentError } = await supabase
+            .from('employee_assignments')
+            .upsert({
+                email: normalizedEmail,
+                name: normalizedName || null,
+                admin_id: normalizedAdminId,
                 role: 'employee',
-                admin_id,
                 assigned_boards: normalizedBoards,
-                assigned_companies: normalizedCompanies
-            }
-        });
+                assigned_companies: normalizedCompanies,
+                status,
+                claimed_user_id: authUser?.id || null,
+                joined_at: authUser ? new Date().toISOString() : null
+            }, { onConflict: 'email' })
+            .select('*')
+            .single();
 
-        if (error) throw error;
-
-        const newUserId = data.user.id;
-        let { error: profileUpsertError } = await supabase.from('profiles').upsert({
-            id: newUserId,
-            email: pseudoEmail,
-            name: normalizedUsername,
-            admin_id,
-            role: 'employee',
-            assigned_boards: normalizedBoards,
-            assigned_companies: normalizedCompanies,
-            board_id: primaryBoardId
-        }, { onConflict: 'id' });
-
-        if (profileUpsertError && isProfileSchemaMismatch(String(profileUpsertError.message || ''))) {
-            const legacyPayload: any = {
-                id: newUserId,
-                email: pseudoEmail,
-                name: normalizedUsername,
-                admin_id,
-                role: 'employee',
-                assigned_board: normalizedBoards[0] || null
-            };
-            if (normalizedCompanies.length > 0) {
-                legacyPayload.assigned_company = normalizedCompanies[0];
-            }
-            const legacyRes = await supabase.from('profiles').upsert(legacyPayload, { onConflict: 'id' });
-            profileUpsertError = legacyRes.error || null;
-        }
-
-        if (profileUpsertError) {
-            const missingAdminColumn = /admin_id/i.test(String(profileUpsertError.message || ''));
-            if (!missingAdminColumn) {
-                console.error('[API] Failed to upsert profile assignments:', profileUpsertError);
-                res.status(500).json({ error: `User created, but profile mapping failed: ${profileUpsertError.message}` });
-                return;
-            }
-            console.warn('[API] Legacy profiles schema detected (missing admin_id). Using auth metadata mapping.');
-        }
-
-        const subject = `New Employee Account: ${normalizedUsername}`;
-        const message = `
-            <div style="font-family: sans-serif; padding: 20px;">
-                <h2>New Employee Credentials Generated</h2>
-                <p>You have successfully created an account for <strong>${normalizedUsername}</strong>.</p>
-                <div style="background: #f1f5f9; padding: 15px; border-radius: 8px; margin: 20px 0;">
-                    <p><strong>Login Email:</strong> ${pseudoEmail}</p>
-                    <p><strong>Password:</strong> ${normalizedPassword}</p>
-                </div>
-                <p>They can use this email and password to log in. They will only see drivers for their assigned boards/companies.</p>
-            </div>
-        `;
-
-        const credentialEmailResult = await sendCustomBroadcastEmail([normalizedAdminEmail], subject, message, []);
-        if (!credentialEmailResult.ok) {
-            res.json({
-                success: true,
-                user: data.user,
-                loginEmail: pseudoEmail,
-                credentialEmailSent: false,
-                warning: `Credential email could not be delivered: ${credentialEmailResult.error || 'Unknown SMTP error'}`
-            });
+        if (assignmentError) {
+            res.status(500).json({ error: assignmentError.message });
             return;
         }
 
-        res.json({ success: true, user: data.user, loginEmail: pseudoEmail, credentialEmailSent: true });
+        if (authUser) {
+            await syncUserAccess(supabase, authUser, {
+                role: 'employee',
+                admin_id: normalizedAdminId,
+                assigned_boards: normalizedBoards,
+                assigned_companies: normalizedCompanies
+            });
+        }
+
+        res.json({
+            success: true,
+            assignment,
+            joined: Boolean(authUser),
+            message: authUser
+                ? `${normalizedEmail} already has an account. Access was updated immediately.`
+                : `${normalizedEmail} is assigned. Access will activate after the user signs in.`
+        });
     } catch (e: any) {
-        console.error('[API] Admin create-user failed:', e);
-        res.status(500).json({ error: e.message });
+        console.error('[API] Admin assign-user failed:', e);
+        if (isMissingEmployeeAssignmentsTable(String(e?.message || ''))) {
+            res.status(500).json({ error: 'Missing Supabase migration: run supabase/migrations/0007_employee_assignments.sql and redeploy Render.' });
+            return;
+        }
+        res.status(500).json({ error: e.message || 'Failed to assign user access.' });
     }
 });
 
-app.get('/api/admin/users', async (req, res) => {
+app.get('/api/admin/assignments', async (req, res) => {
     try {
         const adminId = String(req.query.admin_id || '').trim();
         if (!isUuid(adminId)) {
@@ -377,318 +476,141 @@ app.get('/api/admin/users', async (req, res) => {
 
         const supabase = getDb();
         const { data, error } = await supabase
-            .from('profiles')
+            .from('employee_assignments')
             .select('*')
             .eq('admin_id', adminId)
-            .order('created_at', { ascending: false });
+            .order('updated_at', { ascending: false });
 
-        if (!error) {
-            const mapped: any[] = [];
-            for (const row of (data || [])) {
-                const { data: userData } = await supabase.auth.admin.getUserById(row.id);
-                const meta = readUserMetadata(userData?.user);
-                mapped.push({
-                    id: row.id,
-                    email: row.email,
-                    name: row.name,
-                    role: row.role,
-                    created_at: row.created_at,
-                    // Metadata is the source of truth in mixed legacy schemas.
-                    assigned_boards: meta.assigned_boards.length > 0 ? meta.assigned_boards : pickAssignedBoards(row),
-                    assigned_companies: meta.assigned_companies.length > 0 ? meta.assigned_companies : pickAssignedCompanies(row),
-                    landing_html: userData?.user?.user_metadata?.landing_html || '',
-                    email_template: userData?.user?.user_metadata?.email_template || '',
-                    email_templates: userData?.user?.user_metadata?.email_templates || {}
-                });
+        if (error) {
+            if (isMissingEmployeeAssignmentsTable(String(error.message || ''))) {
+                res.status(500).json({ error: 'Missing Supabase migration: run supabase/migrations/0007_employee_assignments.sql and redeploy Render.' });
+                return;
             }
-            res.json({ success: true, users: mapped });
-            return;
-        }
-
-        if (!/admin_id/i.test(String(error.message || ''))) {
             res.status(500).json({ error: error.message });
             return;
         }
 
-        const fallbackUsers: any[] = [];
-        let page = 1;
-        while (page <= 20) {
-            const { data: listData, error: listError } = await supabase.auth.admin.listUsers({ page, perPage: 200 });
-            if (listError) {
-                res.status(500).json({ error: listError.message });
-                return;
+        const mapped = [];
+        for (const row of (data || [])) {
+            let joinedUserName = row.name || '';
+            let landingHtml = '';
+            let emailTemplate = '';
+            let emailTemplates: Record<string, unknown> = {};
+            if (row.claimed_user_id) {
+                const { data: userData } = await supabase.auth.admin.getUserById(row.claimed_user_id);
+                joinedUserName = String(userData?.user?.user_metadata?.full_name || joinedUserName || row.email);
+                landingHtml = String(userData?.user?.user_metadata?.landing_html || '');
+                emailTemplate = String(userData?.user?.user_metadata?.email_template || '');
+                emailTemplates = (userData?.user?.user_metadata?.email_templates && typeof userData.user.user_metadata.email_templates === 'object')
+                    ? userData.user.user_metadata.email_templates
+                    : {};
             }
-            const users = listData?.users || [];
-            for (const u of users) {
-                const meta = readUserMetadata(u);
-                if (meta.admin_id === adminId) {
-                    fallbackUsers.push({
-                        id: u.id,
-                        email: u.email,
-                        name: u.user_metadata?.full_name || u.email,
-                        role: meta.role || 'employee',
-                        created_at: u.created_at,
-                        assigned_boards: meta.assigned_boards,
-                        assigned_companies: meta.assigned_companies,
-                        landing_html: u.user_metadata?.landing_html || '',
-                        email_template: u.user_metadata?.email_template || '',
-                        email_templates: u.user_metadata?.email_templates || {}
-                    });
-                }
-            }
-            if (users.length < 200) break;
-            page += 1;
+            mapped.push({
+                id: row.id,
+                email: row.email,
+                name: joinedUserName || row.email,
+                role: row.role,
+                assigned_boards: normalizeList(row.assigned_boards).map(normalizeBoardName).filter(Boolean),
+                assigned_companies: normalizeList(row.assigned_companies),
+                status: row.status,
+                claimed_user_id: row.claimed_user_id,
+                joined_at: row.joined_at,
+                invited_at: row.invited_at,
+                updated_at: row.updated_at,
+                landing_html: landingHtml,
+                email_template: emailTemplate,
+                email_templates: emailTemplates
+            });
         }
-        res.json({ success: true, users: fallbackUsers });
+
+        res.json({ success: true, assignments: mapped });
     } catch (e: any) {
-        console.error('[API] Admin list-users failed:', e);
-        res.status(500).json({ error: e.message || 'Failed to load users.' });
+        console.error('[API] Admin list-assignments failed:', e);
+        if (isMissingEmployeeAssignmentsTable(String(e?.message || ''))) {
+            res.status(500).json({ error: 'Missing Supabase migration: run supabase/migrations/0007_employee_assignments.sql and redeploy Render.' });
+            return;
+        }
+        res.status(500).json({ error: e.message || 'Failed to load assignments.' });
     }
 });
 
-app.patch('/api/admin/users/:userId', async (req, res) => {
+app.patch('/api/admin/assignments/:assignmentId', async (req, res) => {
     try {
-        const userId = String(req.params.userId || '').trim();
-        const { admin_id, assigned_boards, assigned_companies, password, landing_html, email_template, email_templates } = req.body || {};
+        const assignmentId = String(req.params.assignmentId || '').trim();
+        const { admin_id, name, assigned_boards, assigned_companies, landing_html, email_template, email_templates } = req.body || {};
         const normalizedAdminId = String(admin_id || '').trim();
-
-        if (!isUuid(userId) || !isUuid(normalizedAdminId)) {
-            res.status(400).json({ error: 'Valid userId and admin_id are required.' });
-            return;
-        }
-
+        const normalizedName = String(name || '').trim();
         const normalizedBoards = normalizeList(assigned_boards).map(normalizeBoardName).filter(Boolean);
         const normalizedCompanies = normalizeList(assigned_companies);
-        const primaryBoardId = boardNameToId(normalizedBoards[0] || null);
+
+        if (!isUuid(assignmentId) || !isUuid(normalizedAdminId)) {
+            res.status(400).json({ error: 'Valid assignmentId and admin_id are required.' });
+            return;
+        }
         if (normalizedBoards.some((board) => !ALLOWED_BOARDS.has(board))) {
             res.status(400).json({ error: 'Only Board A, Board B, or Board C are allowed.' });
             return;
         }
-        if (password && String(password).length < 8) {
-            res.status(400).json({ error: 'Password must be at least 8 characters.' });
-            return;
-        }
 
         const supabase = getDb();
-        const { data: targetProfile, error: targetError } = await supabase
-            .from('profiles')
+        const { data: existing, error: existingError } = await supabase
+            .from('employee_assignments')
             .select('*')
-            .eq('id', userId)
+            .eq('id', assignmentId)
+            .eq('admin_id', normalizedAdminId)
             .single();
 
-        let targetIsOwnedByAdmin = false;
-        if (!targetError && targetProfile) {
-            targetIsOwnedByAdmin = targetProfile.admin_id === normalizedAdminId;
-            if (!targetIsOwnedByAdmin) {
-                const { data: userData } = await supabase.auth.admin.getUserById(userId);
-                const meta = readUserMetadata(userData?.user);
-                targetIsOwnedByAdmin = meta.admin_id === normalizedAdminId;
-            }
-        } else if (/admin_id/i.test(String(targetError?.message || ''))) {
-            const { data: userData, error: userErr } = await supabase.auth.admin.getUserById(userId);
-            if (userErr || !userData?.user) {
-                res.status(404).json({ error: 'User not found.' });
+        if (existingError || !existing) {
+            if (isMissingEmployeeAssignmentsTable(String(existingError?.message || ''))) {
+                res.status(500).json({ error: 'Missing Supabase migration: run supabase/migrations/0007_employee_assignments.sql and redeploy Render.' });
                 return;
             }
-            const meta = readUserMetadata(userData.user);
-            targetIsOwnedByAdmin = meta.admin_id === normalizedAdminId;
-        } else {
-            res.status(404).json({ error: 'User profile not found.' });
-            return;
-        }
-        if (!targetIsOwnedByAdmin) {
-            res.status(403).json({ error: 'This user is not assigned to the provided admin.' });
+            res.status(404).json({ error: 'Assignment not found.' });
             return;
         }
 
-        let { error: profileUpdateError } = await supabase
-            .from('profiles')
+        const { data: assignment, error: updateError } = await supabase
+            .from('employee_assignments')
             .update({
+                name: normalizedName || existing.name || null,
                 assigned_boards: normalizedBoards,
-                assigned_companies: normalizedCompanies,
-                board_id: primaryBoardId
+                assigned_companies: normalizedCompanies
             })
-            .eq('id', userId);
+            .eq('id', assignmentId)
+            .select('*')
+            .single();
 
-        if (profileUpdateError && isProfileSchemaMismatch(String(profileUpdateError.message || ''))) {
-            const legacyUpdate: any = {
-                assigned_board: normalizedBoards[0] || null
-            };
-            if (normalizedCompanies.length > 0) {
-                legacyUpdate.assigned_company = normalizedCompanies[0];
-            }
-            const legacyRes = await supabase
-                .from('profiles')
-                .update(legacyUpdate)
-                .eq('id', userId);
-            profileUpdateError = legacyRes.error || null;
-        }
-
-        if (profileUpdateError) {
-            const errorMessage = String(profileUpdateError.message || '');
-            if (!isProfileSchemaMismatch(errorMessage)) {
-                res.status(500).json({ error: profileUpdateError.message });
-                return;
-            }
-            console.warn('[API] Skipping profile board/company update due to schema mismatch. Continuing with auth metadata update.');
-        }
-
-        const { data: existingUser, error: existingUserError } = await supabase.auth.admin.getUserById(userId);
-        if (existingUserError || !existingUser?.user) {
-            res.status(500).json({ error: existingUserError?.message || 'Could not load user for metadata update.' });
+        if (updateError || !assignment) {
+            res.status(500).json({ error: updateError?.message || 'Failed to update assignment.' });
             return;
         }
-        const currentMeta = existingUser.user.user_metadata || {};
-        const safeEmailTemplates = (email_templates && typeof email_templates === 'object')
-            ? email_templates
-            : (currentMeta.email_templates || {});
-        const { error: metadataUpdateError } = await supabase.auth.admin.updateUserById(userId, {
-            user_metadata: {
-                ...currentMeta,
+
+        if (assignment.claimed_user_id) {
+            const { data: userData, error: userError } = await supabase.auth.admin.getUserById(assignment.claimed_user_id);
+            if (userError || !userData?.user) {
+                res.status(500).json({ error: userError?.message || 'Failed to load claimed user.' });
+                return;
+            }
+
+            await syncUserAccess(supabase, userData.user, {
                 role: 'employee',
                 admin_id: normalizedAdminId,
                 assigned_boards: normalizedBoards,
                 assigned_companies: normalizedCompanies,
-                landing_html: typeof landing_html === 'string' ? landing_html : (currentMeta.landing_html || ''),
-                email_template: typeof email_template === 'string' ? email_template : (currentMeta.email_template || ''),
-                email_templates: safeEmailTemplates
-            }
-        });
-        if (metadataUpdateError) {
-            res.status(500).json({ error: `User metadata update failed: ${metadataUpdateError.message}` });
-            return;
-        }
-
-        if (password) {
-            const { error: passwordError } = await supabase.auth.admin.updateUserById(userId, {
-                password: String(password)
+                landing_html: typeof landing_html === 'string' ? landing_html : undefined,
+                email_template: typeof email_template === 'string' ? email_template : undefined,
+                email_templates: email_templates && typeof email_templates === 'object' ? email_templates : undefined
             });
-            if (passwordError) {
-                res.status(500).json({ error: `Boards updated, but password update failed: ${passwordError.message}` });
-                return;
-            }
         }
 
-        res.json({ success: true });
+        res.json({ success: true, assignment });
     } catch (e: any) {
-        console.error('[API] Admin update-user failed:', e);
-        res.status(500).json({ error: e.message || 'Failed to update user.' });
-    }
-});
-
-app.post('/api/admin/repair-users', async (req, res) => {
-    try {
-        const { admin_id, default_boards } = req.body || {};
-        const normalizedAdminId = String(admin_id || '').trim();
-        const normalizedBoards = normalizeList(default_boards).map(normalizeBoardName).filter(Boolean);
-
-        if (!isUuid(normalizedAdminId)) {
-            res.status(400).json({ error: 'A valid admin_id is required.' });
+        console.error('[API] Admin update-assignment failed:', e);
+        if (isMissingEmployeeAssignmentsTable(String(e?.message || ''))) {
+            res.status(500).json({ error: 'Missing Supabase migration: run supabase/migrations/0007_employee_assignments.sql and redeploy Render.' });
             return;
         }
-        if (normalizedBoards.length === 0) {
-            res.status(400).json({ error: 'At least one default board is required.' });
-            return;
-        }
-        if (normalizedBoards.some((board) => !ALLOWED_BOARDS.has(board))) {
-            res.status(400).json({ error: 'Only Board A, Board B, or Board C are allowed.' });
-            return;
-        }
-
-        const supabase = getDb();
-        const { data: candidates, error: candidateError } = await supabase
-            .from('profiles')
-            .select('*');
-
-        let list = (candidates || []).filter((row: any) =>
-            isPseudoEmployeeEmail(row?.email) || !row?.admin_id || !row?.role
-        );
-        if (candidateError && /admin_id/i.test(String(candidateError.message || ''))) {
-            let page = 1;
-            const metaList: any[] = [];
-            while (page <= 20) {
-                const { data: listData, error: listError } = await supabase.auth.admin.listUsers({ page, perPage: 200 });
-                if (listError) {
-                    res.status(500).json({ error: listError.message });
-                    return;
-                }
-                const users = listData?.users || [];
-                for (const u of users) {
-                    if (isPseudoEmployeeEmail(u.email)) {
-                        metaList.push({
-                            id: u.id,
-                            email: u.email,
-                            role: u.user_metadata?.role,
-                            admin_id: u.user_metadata?.admin_id,
-                            assigned_boards: u.user_metadata?.assigned_boards
-                        });
-                    }
-                }
-                if (users.length < 200) break;
-                page += 1;
-            }
-            list = metaList;
-        } else if (candidateError) {
-            res.status(500).json({ error: candidateError.message });
-            return;
-        }
-        let repaired = 0;
-        const repairedIds: string[] = [];
-
-        for (const row of list) {
-            const currentBoards = pickAssignedBoards(row);
-            const needsAdmin = !row.admin_id;
-            const needsRole = !row.role || row.role !== 'employee';
-            const needsBoards = currentBoards.length === 0;
-            if (!needsAdmin && !needsRole && !needsBoards) continue;
-
-            let { error: updateError } = await supabase
-                .from('profiles')
-                .update({
-                    admin_id: row.admin_id || normalizedAdminId,
-                    role: 'employee',
-                    assigned_boards: needsBoards ? normalizedBoards : currentBoards,
-                    board_id: boardNameToId((needsBoards ? normalizedBoards : currentBoards)[0] || null)
-                })
-                .eq('id', row.id);
-
-            if (updateError && /assigned_boards/i.test(String(updateError.message || ''))) {
-                const legacyRes = await supabase
-                    .from('profiles')
-                    .update({
-                        admin_id: row.admin_id || normalizedAdminId,
-                        role: 'employee',
-                        assigned_board: (needsBoards ? normalizedBoards : currentBoards)[0] || null
-                    })
-                    .eq('id', row.id);
-                updateError = legacyRes.error || null;
-            }
-
-            if (!updateError) {
-                repaired += 1;
-                repairedIds.push(row.id);
-            } else {
-                console.error(`[API] Failed to repair legacy profile ${row.id}:`, updateError);
-            }
-
-            const { data: existingUser, error: existingUserError } = await supabase.auth.admin.getUserById(row.id);
-            if (!existingUserError && existingUser?.user) {
-                const currentMeta = existingUser.user.user_metadata || {};
-                await supabase.auth.admin.updateUserById(row.id, {
-                    user_metadata: {
-                        ...currentMeta,
-                        role: 'employee',
-                        admin_id: row.admin_id || normalizedAdminId,
-                        assigned_boards: needsBoards ? normalizedBoards : currentBoards
-                    }
-                });
-            }
-        }
-
-        res.json({ success: true, repaired, repairedIds });
-    } catch (e: any) {
-        console.error('[API] Admin repair-users failed:', e);
-        res.status(500).json({ error: e.message || 'Failed to repair users.' });
+        res.status(500).json({ error: e.message || 'Failed to update assignment.' });
     }
 });
 

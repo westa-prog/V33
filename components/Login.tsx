@@ -140,7 +140,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
             <div className="flex flex-col gap-3 mb-8">
               <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 p-4 text-sm text-neutral-300">
-                Sign in with your Supabase account first. Google Gmail access can be connected later from inside the app when you want live sending.
+                Employees should sign in with the real email address assigned by the admin. Google sign-in will claim board access automatically after the first join.
               </div>
 
               <div className="flex items-center gap-3 text-xs text-neutral-500 uppercase font-bold">
