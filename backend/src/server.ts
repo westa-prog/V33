@@ -161,6 +161,101 @@ app.post('/api/admin/create-user', async (req, res) => {
     }
 });
 
+app.get('/api/admin/users', async (req, res) => {
+    try {
+        const adminId = String(req.query.admin_id || '').trim();
+        if (!isUuid(adminId)) {
+            res.status(400).json({ error: 'A valid admin_id is required.' });
+            return;
+        }
+
+        const supabase = getDb();
+        const { data, error } = await supabase
+            .from('profiles')
+            .select('id, email, name, role, assigned_boards, assigned_companies, created_at')
+            .eq('admin_id', adminId)
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            res.status(500).json({ error: error.message });
+            return;
+        }
+
+        res.json({ success: true, users: data || [] });
+    } catch (e: any) {
+        console.error('[API] Admin list-users failed:', e);
+        res.status(500).json({ error: e.message || 'Failed to load users.' });
+    }
+});
+
+app.patch('/api/admin/users/:userId', async (req, res) => {
+    try {
+        const userId = String(req.params.userId || '').trim();
+        const { admin_id, assigned_boards, assigned_companies, password } = req.body || {};
+        const normalizedAdminId = String(admin_id || '').trim();
+
+        if (!isUuid(userId) || !isUuid(normalizedAdminId)) {
+            res.status(400).json({ error: 'Valid userId and admin_id are required.' });
+            return;
+        }
+
+        const normalizedBoards = normalizeList(assigned_boards);
+        const normalizedCompanies = normalizeList(assigned_companies);
+        if (normalizedBoards.some((board) => !ALLOWED_BOARDS.has(board))) {
+            res.status(400).json({ error: 'Only Board A, Board B, or Board C are allowed.' });
+            return;
+        }
+        if (password && String(password).length < 8) {
+            res.status(400).json({ error: 'Password must be at least 8 characters.' });
+            return;
+        }
+
+        const supabase = getDb();
+        const { data: targetProfile, error: targetError } = await supabase
+            .from('profiles')
+            .select('id, admin_id')
+            .eq('id', userId)
+            .single();
+
+        if (targetError || !targetProfile) {
+            res.status(404).json({ error: 'User profile not found.' });
+            return;
+        }
+        if (targetProfile.admin_id !== normalizedAdminId) {
+            res.status(403).json({ error: 'This user is not assigned to the provided admin.' });
+            return;
+        }
+
+        const { error: profileUpdateError } = await supabase
+            .from('profiles')
+            .update({
+                assigned_boards: normalizedBoards,
+                assigned_companies: normalizedCompanies
+            })
+            .eq('id', userId);
+
+        if (profileUpdateError) {
+            res.status(500).json({ error: profileUpdateError.message });
+            return;
+        }
+
+        if (password) {
+            const { error: passwordError } = await supabase.auth.admin.updateUserById(userId, {
+                password: String(password)
+            });
+            if (passwordError) {
+                res.status(500).json({ error: `Boards updated, but password update failed: ${passwordError.message}` });
+                return;
+            }
+        }
+
+        res.json({ success: true });
+    } catch (e: any) {
+        console.error('[API] Admin update-user failed:', e);
+        res.status(500).json({ error: e.message || 'Failed to update user.' });
+    }
+});
+
 app.post('/api/drivers/create', async (req, res) => {
     try {
         const { acting_user_id, name, email, company, board, deviceType, appVersion, eldStatus, dutyStatus, followUp } = req.body || {};
