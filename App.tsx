@@ -1023,8 +1023,8 @@ const App: React.FC = () => {
 
   return (
     <div className={`app-shell theme-${theme} flex h-screen bg-slate-50 dark:bg-transparent overflow-hidden transition-colors relative`}>
-      <div className="hidden dark:block absolute inset-0 -z-20 pointer-events-none overflow-hidden">
-        <HeroBackground />
+      <div className="absolute inset-0 -z-20 pointer-events-none overflow-hidden">
+        <HeroBackground className={theme === 'dark' ? 'opacity-100' : 'opacity-35'} />
       </div>
 
       {authUser && (

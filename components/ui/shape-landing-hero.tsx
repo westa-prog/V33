@@ -72,9 +72,9 @@ function ElegantShape({
 }
 
 // 1. Standalone Background Component
-export function HeroBackground() {
+export function HeroBackground({ className }: { className?: string }) {
     return (
-        <div className="absolute inset-0 w-full h-full overflow-hidden bg-[#030303] pointer-events-none -z-10">
+        <div className={cn("absolute inset-0 w-full h-full overflow-hidden bg-[#030303] pointer-events-none -z-10", className)}>
             <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/[0.05] via-transparent to-rose-500/[0.05] blur-3xl" />
             <div className="absolute inset-0 overflow-hidden">
                 <ElegantShape

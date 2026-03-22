@@ -4,6 +4,7 @@ import { Mail, Lock, User, ShieldCheck } from 'lucide-react';
 import { SplineScene } from './ui/splite';
 import { Card } from './ui/card';
 import { Spotlight } from './ui/spotlight';
+import { HeroBackground } from './ui/shape-landing-hero';
 import { motion } from 'framer-motion';
 import { cn } from '../lib/utils';
 import { supabase } from '../supabase';
@@ -120,6 +121,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-black p-4 md:p-8 relative overflow-hidden">
+      <HeroBackground className="opacity-100" />
       <Spotlight className="-top-40 left-0 md:left-60 md:-top-20" fill="white" />
 
       <Card className="w-full max-w-6xl h-auto md:h-[700px] bg-neutral-900/50 backdrop-blur-xl border-neutral-800 relative overflow-hidden shadow-2xl z-10">
@@ -270,8 +272,6 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
         </div>
       </Card>
 
-      <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-indigo-600/10 rounded-full blur-[120px] -mr-64 -mt-64"></div>
-      <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-purple-600/10 rounded-full blur-[120px] -ml-64 -mb-64"></div>
     </div>
   );
 };
