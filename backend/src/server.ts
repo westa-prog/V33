@@ -77,6 +77,9 @@ const readUserMetadata = (user: any) => {
         assigned_companies: pickMetadataList(meta.assigned_companies || meta.assigned_company)
     };
 };
+const isProfileSchemaMismatch = (message: string) => {
+    return /assigned_boards|assigned_board|assigned_companies|admin_id/i.test(message || '');
+};
 
 const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
@@ -383,10 +386,12 @@ app.patch('/api/admin/users/:userId', async (req, res) => {
         }
 
         if (profileUpdateError) {
-            if (!/assigned_boards|assigned_companies|admin_id/i.test(String(profileUpdateError.message || ''))) {
+            const errorMessage = String(profileUpdateError.message || '');
+            if (!isProfileSchemaMismatch(errorMessage)) {
                 res.status(500).json({ error: profileUpdateError.message });
                 return;
             }
+            console.warn('[API] Skipping profile board/company update due to schema mismatch. Continuing with auth metadata update.');
         }
 
         const { data: existingUser, error: existingUserError } = await supabase.auth.admin.getUserById(userId);
