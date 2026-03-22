@@ -34,6 +34,8 @@ Files used for Render:
 - [backend/.env.example](/c:/Users/AA6/Desktop/Asana/V33/backend/.env.example)
 - [backend architecture doc](/c:/Users/AA6/Desktop/Asana/V33/docs/backend-architecture.md)
 - [deployment runbook](/c:/Users/AA6/Desktop/Asana/V33/docs/deployment-runbook.md)
+- [release checklist](/c:/Users/AA6/Desktop/Asana/V33/docs/release-checklist.md)
+- [API contract](/c:/Users/AA6/Desktop/Asana/V33/docs/api-contract.md)
 - [core Supabase migration](/c:/Users/AA6/Desktop/Asana/V33/supabase/migrations/0001_app_core.sql)
 - [AI assistant Supabase migration](/c:/Users/AA6/Desktop/Asana/V33/supabase/migrations/0002_ai_assistant.sql)
 
@@ -42,6 +44,7 @@ Required Render environment variables:
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
 - `VITE_GEMINI_API_KEY`
+- `VITE_API_URL`
 - `VITE_GOOGLE_CLIENT_ID` if you want Gmail OAuth in the UI
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
@@ -56,6 +59,7 @@ Required Render environment variables:
 Important:
 
 - The app health check is `GET /api/status`.
+- The release gate is `GET /api/status -> releaseReady === true`.
 - Render builds the frontend first, so all `VITE_*` variables must be present in Render before the first deploy.
 - Run the SQL migrations in `supabase/migrations/` before using the app against a fresh Supabase project.
 
@@ -67,6 +71,7 @@ Important:
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_ANON_KEY`
    - `VITE_GEMINI_API_KEY`
+   - `VITE_API_URL`
    - optional `VITE_GOOGLE_CLIENT_ID`
 4. Add backend env values in `backend/.env`:
    - `SUPABASE_URL`

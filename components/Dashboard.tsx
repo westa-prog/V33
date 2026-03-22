@@ -4,6 +4,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Ba
 import { Mail, RefreshCw, Server } from 'lucide-react';
 import axios from 'axios';
 import { HorizonHeroSection } from './ui/horizon-hero-section';
+import { supabaseConfigDiagnostics } from '../supabase';
 
 interface DashboardProps {
     drivers: Driver[];
@@ -23,11 +24,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, em
     const [boardFilter, setBoardFilter] = useState<string | 'ALL'>('ALL');
     const [backendStatus, setBackendStatus] = useState<{
         status: string;
+        releaseReady?: boolean;
         emailConfigured: boolean;
         emailMode?: 'smtp' | 'resend' | 'smtp+resend' | 'simulation';
         smtpConfigured?: boolean;
         resendConfigured?: boolean;
         uploadsEnabled: boolean;
+        checks?: Record<string, boolean>;
+        warnings?: string[];
     } | null>(null);
     const [statusLoading, setStatusLoading] = useState(false);
 
@@ -74,7 +78,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, em
             const res = await axios.get(apiUrl('/api/status'));
             setBackendStatus(res.data);
         } catch {
-            setBackendStatus({ status: 'offline', emailConfigured: false, uploadsEnabled: false });
+            setBackendStatus({ status: 'offline', emailConfigured: false, uploadsEnabled: false, releaseReady: false, warnings: ['Backend status check failed.'] });
         } finally {
             setStatusLoading(false);
         }
@@ -95,6 +99,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, em
     }, [effectiveApiBaseUrl]);
 
     const COLORS = ['#60a5fa', '#34d399', '#fbbf24', '#f87171', '#a78bfa'];
+    const frontendWarnings = useMemo(() => {
+        const warnings: string[] = [];
+        if (!supabaseConfigDiagnostics.publishReady) {
+            warnings.push('Frontend is using fallback Supabase config. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY before publishing.');
+        }
+        if (!effectiveApiBaseUrl && !isLocalHost) {
+            warnings.push('VITE_API_URL is not set for the deployed frontend. API requests rely on same-origin routing.');
+        }
+        return warnings;
+    }, [effectiveApiBaseUrl, isLocalHost]);
+    const allWarnings = [...frontendWarnings, ...(backendStatus?.warnings || [])];
 
     return (
         <div className="space-y-6 animate-in fade-in zoom-in-95 duration-200">
@@ -233,7 +248,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, em
                         </button>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                         <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 p-5">
                             <div className="flex items-center gap-3 mb-3">
                                 <Server className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
@@ -243,6 +258,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, em
                                 {statusLoading ? 'CHECKING' : backendStatus?.status === 'online' ? 'ONLINE' : 'OFFLINE'}
                             </p>
                             <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">Used by the admin panel and broadcast tools.</p>
+                        </div>
+
+                        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 p-5">
+                            <div className="flex items-center gap-3 mb-3">
+                                <Server className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                                <span className="text-sm font-bold text-slate-700 dark:text-slate-200">Release Gate</span>
+                            </div>
+                            <p className={`text-2xl font-black ${backendStatus?.releaseReady ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                                {backendStatus?.releaseReady ? 'READY' : 'BLOCKED'}
+                            </p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+                                {backendStatus?.releaseReady
+                                    ? 'Critical backend, schema, and email checks are passing.'
+                                    : 'Resolve backend warnings before publishing the app.'}
+                            </p>
                         </div>
 
                         <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 p-5">
@@ -281,6 +311,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, em
                             <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">Broadcast uploads are handled by the Node backend before email delivery.</p>
                         </div>
                     </div>
+
+                    {allWarnings.length > 0 && (
+                        <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/60 dark:bg-amber-950/30">
+                            <h4 className="text-sm font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300">Release Warnings</h4>
+                            <div className="mt-3 space-y-2">
+                                {allWarnings.map((warning) => (
+                                    <p key={warning} className="text-sm text-amber-700 dark:text-amber-200">
+                                        {warning}
+                                    </p>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

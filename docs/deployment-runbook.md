@@ -108,9 +108,10 @@ Render uses:
 After deploy, validate:
 
 1. `GET /api/status` returns `status: online`.
-2. Admin panel can create employee users.
-3. Broadcast endpoint accepts recipients + attachments.
-4. Frontend can read/write driver data via Supabase.
+2. `GET /api/status` returns `releaseReady: true`.
+3. Admin panel can create employee users.
+4. Broadcast endpoint accepts recipients + attachments.
+5. Frontend can read/write driver data via Supabase.
 
 Quick deployed API check:
 
@@ -142,9 +143,10 @@ Recommended quick checks:
 
 1. Login with Supabase auth.
 2. Create one driver via Add Driver.
-3. Send one broadcast to a test inbox.
-4. Open AI Assistant and confirm message history persists after refresh.
-5. Log out and log back in to confirm profile/filters remain correct.
+3. Update that driver and confirm it stays visible in the expected company/filter view.
+4. Send one broadcast to a test inbox.
+5. Open AI Assistant and confirm message history persists after refresh.
+6. Log out and log back in to confirm profile/filters remain correct.
 
 ## 8) Realtime Checklist
 

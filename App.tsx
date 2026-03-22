@@ -23,7 +23,6 @@ import {
   subscribeToCompanies,
   subscribeToEmailLogs,
   subscribeToDriverReplies,
-  updateDriver as updateDriverInSupabase,
   addEmailLog
 } from './services/supabaseService';
 import { sendGmailMessage, fetchGmailReplies } from './services/gmailService';
@@ -61,6 +60,9 @@ const normalizeBoard = (value?: string | null): string => {
 const normalizeBoardList = (list?: (string | null | undefined)[]): string[] => {
   if (!Array.isArray(list)) return [];
   return list.map((item) => normalizeBoard(item || '')).filter(Boolean);
+};
+const normalizeCompanyLabel = (value?: string | null): string => {
+  return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
 };
 const LEGACY_PSEUDO_EMAIL_DOMAIN = 'v33.local';
 const PSEUDO_EMAIL_DOMAIN = (((import.meta as any).env.VITE_PSEUDO_EMAIL_DOMAIN || 'dilshod.algo') as string)
@@ -178,6 +180,24 @@ const buildProfileFormReminderEmail = (driver: Driver, days: 3 | 5, senderName: 
 
   return { subject, body, profileFormStatus, followUpRequired };
 };
+
+const deriveDriverAlertState = (driver: Driver): Partial<Driver> => {
+  const isDisconnected = driver.eldStatus === ELDStatus.DISCONNECTED;
+  const isAtWork = [DutyStatus.DRIVING, DutyStatus.ON_DUTY].includes(driver.dutyStatus);
+  const lastSentRaw = driver.lastSentAt || driver.lastEmailTime;
+  const lastSent = lastSentRaw ? new Date(lastSentRaw).getTime() : 0;
+  const oneHour = 60 * 60 * 1000;
+  const canSendNow = !lastSent || (Date.now() - lastSent) >= oneHour;
+
+  if (isDisconnected && isAtWork) {
+    return { hasPendingAlert: canSendNow };
+  }
+
+  return {
+    hasPendingAlert: false,
+    emailSent: isDisconnected ? driver.emailSent : false
+  };
+};
 import {
   ArrowLeftRight,
   MessageSquare,
@@ -253,6 +273,83 @@ const App: React.FC = () => {
   const rawApiBaseUrl = ((import.meta as any).env.VITE_API_URL || '').trim();
   const apiBaseUrl = rawApiBaseUrl.replace(/\/+$/, '');
   const apiUrl = (path: string) => apiBaseUrl ? `${apiBaseUrl}${path}` : path;
+
+  const syncAuthMetadataFromCurrentUser = useCallback(async () => {
+    const { data, error } = await supabase.auth.getUser();
+    if (error || !data?.user) return;
+    const currentUser = data.user;
+    setAuthUser(prev => prev ? ({
+      ...prev,
+      email: currentUser.email || prev.email,
+      name: (currentUser.user_metadata?.full_name as string) || prev.name,
+      role: normalizeAuthRole(currentUser.user_metadata?.role) || prev.role,
+      adminId: (currentUser.user_metadata?.admin_id as string) || prev.adminId,
+      assignedBoards: Array.isArray(currentUser.user_metadata?.assigned_boards)
+        ? normalizeBoardList(currentUser.user_metadata.assigned_boards)
+        : (currentUser.user_metadata?.assigned_board ? [normalizeBoard(currentUser.user_metadata.assigned_board)] : prev.assignedBoards),
+      assignedBoard: Array.isArray(currentUser.user_metadata?.assigned_boards) && currentUser.user_metadata.assigned_boards.length > 0
+        ? normalizeBoard(currentUser.user_metadata.assigned_boards[0])
+        : normalizeBoard((currentUser.user_metadata?.assigned_board as string) || prev.assignedBoard),
+      assignedCompanies: Array.isArray(currentUser.user_metadata?.assigned_companies)
+        ? currentUser.user_metadata.assigned_companies
+        : (currentUser.user_metadata?.assigned_company ? [currentUser.user_metadata.assigned_company] : prev.assignedCompanies),
+      landingHtml: (currentUser.user_metadata?.landing_html as string) || prev.landingHtml,
+      emailTemplate: (currentUser.user_metadata?.email_template as string) || prev.emailTemplate,
+      emailTemplates: typeof currentUser.user_metadata?.email_templates === 'object' && currentUser.user_metadata?.email_templates
+        ? (currentUser.user_metadata.email_templates as EmailTemplateMap)
+        : prev.emailTemplates
+    }) : prev);
+  }, []);
+
+  const persistDriverUpdate = useCallback(async (id: string, updates: Partial<Driver>) => {
+    if (!activeUserId) return;
+    const currentDriver = drivers.find((driver) => driver.id === id);
+    const payload = {
+      ...updates,
+      company: updates.company ?? currentDriver?.company,
+      companyId: updates.companyId ?? currentDriver?.companyId ?? null,
+      board: updates.board ?? currentDriver?.board,
+      boardId: updates.boardId ?? currentDriver?.boardId ?? null
+    };
+
+    const response = await fetch(apiUrl(`/api/drivers/${id}`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        acting_user_id: activeUserId,
+        ...payload,
+        company_id: payload.companyId,
+        board_id: payload.boardId
+      })
+    });
+
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(data?.error || `Driver update failed (${response.status})`);
+    }
+
+    return data?.driver || null;
+  }, [activeUserId, apiBaseUrl, drivers]);
+
+  const companyById = useMemo(() => {
+    return new Map(companies.map((company) => [company.id, company]));
+  }, [companies]);
+
+  const hydratedDrivers = useMemo(() => {
+    return drivers.map((driver) => {
+      const companyRecord = driver.companyId ? companyById.get(driver.companyId) : undefined;
+      const resolvedCompany = driver.company || companyRecord?.name || '';
+      const resolvedBoard = normalizeBoard(driver.board || driver.boardId || companyRecord?.boardId || '');
+      if (resolvedCompany === driver.company && resolvedBoard === normalizeBoard(driver.board)) {
+        return driver;
+      }
+      return {
+        ...driver,
+        company: resolvedCompany,
+        board: resolvedBoard || driver.board
+      };
+    });
+  }, [companyById, drivers]);
 
   const sendLiveEmail = useCallback(async (
     recipient: string,
@@ -432,6 +529,7 @@ const App: React.FC = () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ user_id: activeUserId })
           });
+          await syncAuthMetadataFromCurrentUser();
         } catch (err) {
           console.warn('Failed to ensure user profile assignments:', err);
         }
@@ -524,7 +622,7 @@ const App: React.FC = () => {
       unsubLogs();
       unsubReplies();
     };
-  }, [activeUserId, driverOwnerUserId, authUser?.email, authUser?.name, allowedBoards.join('|'), isAdminUser, user?.accessToken, user?.email, user?.name]);
+  }, [activeUserId, driverOwnerUserId, authUser?.email, authUser?.name, allowedBoards.join('|'), isAdminUser, syncAuthMetadataFromCurrentUser, user?.accessToken, user?.email, user?.name]);
 
   useEffect(() => {
     if (!activeUserId) return;
@@ -541,11 +639,14 @@ const App: React.FC = () => {
         name: profile.name || prev.name,
         email: profile.email || prev.email
       } : prev);
+      syncAuthMetadataFromCurrentUser().catch((error) => {
+        console.warn('Failed to refresh auth metadata after profile update:', error);
+      });
     });
     return () => {
       unsubProfile();
     };
-  }, [activeUserId]);
+  }, [activeUserId, syncAuthMetadataFromCurrentUser]);
 
   useEffect(() => {
     if (isAdminUser) {
@@ -622,11 +723,11 @@ const App: React.FC = () => {
   };
 
   const filteredDrivers = useMemo(() => {
-    return drivers.filter(driver => {
+    return hydratedDrivers.filter(driver => {
       const matchesName = driver.name.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesEld = eldFilter === 'ALL' || driver.eldStatus === eldFilter;
       const matchesDuty = dutyFilter === 'ALL' || driver.dutyStatus === dutyFilter;
-      const matchesCompany = companyFilter === 'ALL' || driver.company === companyFilter;
+      const matchesCompany = companyFilter === 'ALL' || normalizeCompanyLabel(driver.company) === normalizeCompanyLabel(companyFilter);
 
       if (isAdminUser) {
         const matchesBoard = boardFilter === 'ALL' || normalizeBoard(driver.board) === normalizeBoard(boardFilter);
@@ -634,17 +735,17 @@ const App: React.FC = () => {
       }
 
       const allowedBoards = normalizeBoardList(authUser?.assignedBoards || (authUser?.assignedBoard ? [authUser.assignedBoard] : []));
-      const allowedCompanies = authUser?.assignedCompanies || [];
+      const allowedCompanies = (authUser?.assignedCompanies || []).map((company) => normalizeCompanyLabel(company));
       const matchesBoard = allowedBoards.length > 0
         ? allowedBoards.includes(normalizeBoard(driver.board))
         : (boardFilter === 'ALL' || normalizeBoard(driver.board) === normalizeBoard(boardFilter));
       const matchesAssignedCompany = allowedCompanies.length > 0
-        ? allowedCompanies.includes(driver.company)
+        ? allowedCompanies.includes(normalizeCompanyLabel(driver.company))
         : true;
 
       return matchesName && matchesEld && matchesDuty && matchesCompany && matchesBoard && matchesAssignedCompany;
     });
-  }, [drivers, searchQuery, eldFilter, dutyFilter, companyFilter, boardFilter, authUser, isAdminUser]);
+  }, [hydratedDrivers, searchQuery, eldFilter, dutyFilter, companyFilter, boardFilter, authUser, isAdminUser]);
 
   const stats = useMemo(() => {
     const violations = filteredDrivers.filter(d => d.eldStatus === ELDStatus.DISCONNECTED && [DutyStatus.DRIVING, DutyStatus.ON_DUTY].includes(d.dutyStatus)).length;
@@ -657,22 +758,9 @@ const App: React.FC = () => {
   }, [filteredDrivers, emailLogs, driverReplies]);
 
   const processAlertLogic = useCallback(async (driver: Driver) => {
-    const isDisconnected = driver.eldStatus === ELDStatus.DISCONNECTED;
-    const isAtWork = [DutyStatus.DRIVING, DutyStatus.ON_DUTY].includes(driver.dutyStatus);
-    const now = new Date().getTime();
-    const lastSentRaw = driver.lastSentAt || driver.lastEmailTime;
-    const lastSent = lastSentRaw ? new Date(lastSentRaw).getTime() : 0;
-    const oneHour = 60 * 60 * 1000;
-    const canSendNow = !lastSent || (now - lastSent) >= oneHour;
-
-    if (isDisconnected && isAtWork) {
-      if (driver.hasPendingAlert !== canSendNow) {
-        setDrivers(prev => prev.map(d => d.id === driver.id ? { ...d, hasPendingAlert: canSendNow } : d));
-      }
-    } else if (!isDisconnected && driver.hasPendingAlert) {
-      setDrivers(prev => prev.map(d => d.id === driver.id ? { ...d, hasPendingAlert: false } : d));
-    } else if (!isDisconnected && driver.emailSent) {
-      setDrivers(prev => prev.map(d => d.id === driver.id ? { ...d, emailSent: false } : d));
+    const derived = deriveDriverAlertState(driver);
+    if (driver.hasPendingAlert !== derived.hasPendingAlert || driver.emailSent !== derived.emailSent) {
+      setDrivers(prev => prev.map(d => d.id === driver.id ? { ...d, ...derived } : d));
     }
   }, []);
 
@@ -680,7 +768,7 @@ const App: React.FC = () => {
     driverId: string,
     options?: { silent?: boolean; automationType?: 'driving_disconnected' | 'onduty_disconnected' }
   ): Promise<{ sentAt: string }> => {
-    const driver = drivers.find(d => d.id === driverId);
+    const driver = hydratedDrivers.find(d => d.id === driverId);
     if (!driver) throw new Error('Driver not found');
 
     if (driver.lastEmailTime) {
@@ -750,7 +838,7 @@ const App: React.FC = () => {
     // Persist to Supabase
     const logOwnerId = driverOwnerUserId || activeUserId;
     if (activeUserId && logOwnerId) {
-      await updateDriverInSupabase(activeUserId, driver.id, updatedDriver, logOwnerId);
+      await persistDriverUpdate(driver.id, updatedDriver);
       await addEmailLog(logOwnerId, logEntry);
     }
 
@@ -758,7 +846,7 @@ const App: React.FC = () => {
   };
 
   const handleProfileFormReminder = async (driverId: string, days: 3 | 5) => {
-    const driver = drivers.find(d => d.id === driverId);
+    const driver = hydratedDrivers.find(d => d.id === driverId);
     if (!driver) throw new Error('Driver not found');
 
     const { subject, body, profileFormStatus, followUpRequired } = buildProfileFormReminderEmail(driver, days, senderDisplayName);
@@ -817,25 +905,25 @@ const App: React.FC = () => {
 
     const logOwnerId = driverOwnerUserId || activeUserId;
     if (activeUserId && logOwnerId) {
-      await updateDriverInSupabase(activeUserId, driver.id, updatePayload, logOwnerId);
+      await persistDriverUpdate(driver.id, updatePayload);
       await addEmailLog(logOwnerId, logEntry);
     }
   };
 
   const handleUpdatePFDate = async (driverId: string, dateStr: string) => {
-    const driver = drivers.find(d => d.id === driverId);
+    const driver = hydratedDrivers.find(d => d.id === driverId);
     if (!driver) return;
 
     const updatePayload = { lastPFUpdate: dateStr };
     setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, ...updatePayload } : d));
 
     if (activeUserId && (driverOwnerUserId || activeUserId)) {
-      await updateDriverInSupabase(activeUserId, driverId, updatePayload, driverOwnerUserId || activeUserId);
+      await persistDriverUpdate(driverId, updatePayload);
     }
   };
 
   const handleCustomEmail = async (driverId: string, subject: string, body: string, attachments: { name: string; type: string; base64: string }[]) => {
-    const driver = drivers.find(d => d.id === driverId);
+    const driver = hydratedDrivers.find(d => d.id === driverId);
     if (!driver || !driver.email) throw new Error("Driver not found or missing email.");
 
     let sentSuccess = false;
@@ -909,17 +997,36 @@ const App: React.FC = () => {
   // This avoids immediate auto-send and keeps escalation visible in the table.
 
   const handleUpdateDriver = async (id: string, updates: Partial<Driver>) => {
+    let previousDriver: Driver | undefined;
     let updatedDriver: Driver | undefined;
+    let persistencePayload: Partial<Driver> | undefined;
 
     setDrivers(prev => {
-      const newDrivers = prev.map(d => d.id === id ? { ...d, ...updates } : d);
+      previousDriver = prev.find(d => d.id === id);
+      const newDrivers = prev.map(d => {
+        if (d.id !== id) return d;
+        const merged = { ...d, ...updates };
+        const derived = deriveDriverAlertState(merged);
+        persistencePayload = { ...updates, ...derived };
+        return { ...merged, ...derived };
+      });
       updatedDriver = newDrivers.find(d => d.id === id);
       return newDrivers;
     });
 
-    // Persist to Supabase
-    if (updatedDriver && activeUserId) {
-      await updateDriverInSupabase(activeUserId, id, updates, driverOwnerUserId || activeUserId);
+    if (updatedDriver && activeUserId && persistencePayload) {
+      try {
+        const persistedDriver = await persistDriverUpdate(id, persistencePayload);
+        if (persistedDriver) {
+          setDrivers(prev => prev.map(d => d.id === id ? { ...d, ...persistedDriver } : d));
+        }
+      } catch (error: any) {
+        if (previousDriver) {
+          setDrivers(prev => prev.map(d => d.id === id ? previousDriver! : d));
+        }
+        alert(error?.message || 'Failed to save driver update.');
+        throw error;
+      }
     }
   };
 
@@ -1149,7 +1256,7 @@ const App: React.FC = () => {
             </div>
             <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800">
               <DriverTable
-                drivers={drivers}
+                drivers={hydratedDrivers}
                 companies={companies}
                 filteredDrivers={filteredDrivers}
                 filters={{ searchQuery, eldFilter, dutyFilter, companyFilter, boardFilter }}

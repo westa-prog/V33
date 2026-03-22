@@ -15,6 +15,13 @@ export interface UserProfile {
 
 type DriverRealtimeEvent = 'INSERT' | 'UPDATE' | 'DELETE';
 
+const throwIfSupabaseError = (scope: string, error: any) => {
+    if (!error) return;
+    const message = error?.message || String(error);
+    console.error(`[SUPABASE] ${scope} failed:`, error);
+    throw new Error(message);
+};
+
 const boardLabelToId = (board?: string | null): string | null => {
     const raw = (board || '').trim().toUpperCase();
     if (!raw) return null;
@@ -38,6 +45,46 @@ const normalizeList = (value: unknown): string[] => {
     return value.map((v) => typeof v === 'string' ? v.trim() : '').filter(Boolean);
 };
 
+const dedupeDriverRows = (rows: any[]) => {
+    const bestRows = new Map<string, any>();
+
+    const scoreRow = (row: any) => {
+        let score = 0;
+        if (row.company_id) score += 5;
+        if (row.companies?.name) score += 3;
+        if (row.board_id) score += 2;
+        if (row.lastpfupdate) score += 1;
+        if (row.lastemailtime) score += 1;
+        if (row.lastsentat) score += 1;
+        return score;
+    };
+
+    const rowTimestamp = (row: any) => {
+        const raw = row.updated_at || row.created_at || 0;
+        const parsed = new Date(raw).getTime();
+        return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    for (const row of rows) {
+        const normalizedEmail = String(row.email || '').trim().toLowerCase();
+        const boardId = String(row.board_id || '').trim().toUpperCase();
+        const key = normalizedEmail ? `${normalizedEmail}::${boardId}` : String(row.id);
+        const current = bestRows.get(key);
+        if (!current) {
+            bestRows.set(key, row);
+            continue;
+        }
+
+        const currentScore = scoreRow(current);
+        const nextScore = scoreRow(row);
+        if (nextScore > currentScore || (nextScore === currentScore && rowTimestamp(row) > rowTimestamp(current))) {
+            bestRows.set(key, row);
+        }
+    }
+
+    return Array.from(bestRows.values());
+};
+
 export const initializeUserDatabase = async (_userId: string, _userEmail: string, _userName: string) => {
     // Profile is created by DB trigger.
     return true;
@@ -50,7 +97,8 @@ export const fetchUserProfile = async (userId: string): Promise<UserProfile | nu
         .eq('id', userId)
         .single();
 
-    if (error || !data) return null;
+    throwIfSupabaseError('fetchUserProfile', error);
+    if (!data) return null;
     const row: any = data;
     const boards = Array.isArray(row.assigned_boards)
         ? normalizeList(row.assigned_boards)
@@ -87,15 +135,17 @@ export const subscribeToUserProfile = (userId: string, callback: (profile: UserP
 };
 
 export const hasImportedFromSheets = async (userId: string): Promise<boolean> => {
-    const { data } = await supabase.from('profiles').select('has_imported_from_sheets').eq('id', userId).single();
+    const { data, error } = await supabase.from('profiles').select('has_imported_from_sheets').eq('id', userId).single();
+    throwIfSupabaseError('hasImportedFromSheets', error);
     return data?.has_imported_from_sheets === true;
 };
 
 export const markSheetsImported = async (userId: string) => {
-    await supabase.from('profiles').update({
+    const { error } = await supabase.from('profiles').update({
         has_imported_from_sheets: true,
         imported_at: new Date().toISOString()
     }).eq('id', userId);
+    throwIfSupabaseError('markSheetsImported', error);
 };
 
 const mapDriverToDb = (driver: Partial<Driver>) => {
@@ -126,16 +176,17 @@ const mapDriverToDb = (driver: Partial<Driver>) => {
 
 const mapDbToDriver = (dbRow: any, creatorMap?: Record<string, { name?: string; email?: string }>): Driver => {
     const creator = creatorMap?.[dbRow.created_by || ''] || {};
-    const boardId = dbRow.board_id || null;
+    const boardId = dbRow.board_id || dbRow.boardId || null;
+    const companyName = dbRow.companies?.name || dbRow.company || dbRow.companyName || '';
     return {
         id: dbRow.id,
         name: dbRow.name,
         email: dbRow.email,
-        company: dbRow.companies?.name || '',
-        board: boardIdToLabel(boardId),
-        companyId: dbRow.company_id || null,
+        company: companyName,
+        board: boardIdToLabel(boardId) || dbRow.board || '',
+        companyId: dbRow.company_id || dbRow.companyId || null,
         boardId,
-        createdBy: dbRow.created_by || null,
+        createdBy: dbRow.created_by || dbRow.createdBy || null,
         createdByName: creator.name || null,
         createdByEmail: creator.email || null,
         deviceType: dbRow.devicetype || '',
@@ -160,10 +211,11 @@ const hydrateCreatorMap = async (rows: any[]) => {
     const map: Record<string, { name?: string; email?: string }> = {};
     if (ids.length === 0) return map;
 
-    const { data } = await supabase
+    const { data, error } = await supabase
         .from('profiles')
         .select('id,name,email')
         .in('id', ids);
+    throwIfSupabaseError('hydrateCreatorMap', error);
     for (const profile of (data || [])) {
         map[profile.id] = { name: profile.name, email: profile.email };
     }
@@ -171,46 +223,52 @@ const hydrateCreatorMap = async (rows: any[]) => {
 };
 
 const fetchDriverRecord = async (driverId: string) => {
-    const { data } = await supabase
+    const { data, error } = await supabase
         .from('drivers_new')
         .select('*, companies(id,name,board_id)')
         .eq('id', driverId)
         .maybeSingle();
+    throwIfSupabaseError('fetchDriverRecord', error);
     return data || null;
 };
 
 export const fetchDrivers = async (_ownerId: string): Promise<Driver[]> => {
-    const { data } = await supabase
+    const { data, error } = await supabase
         .from('drivers_new')
         .select('*, companies(id,name,board_id)')
         .order('created_at', { ascending: false });
+    throwIfSupabaseError('fetchDrivers', error);
 
-    const rows = data || [];
+    const rows = dedupeDriverRows(data || []);
     const creatorMap = await hydrateCreatorMap(rows);
     return rows.map((row) => mapDbToDriver(row, creatorMap));
 };
 
 export const addDriver = async (_userId: string, driver: Driver) => {
     const row = mapDriverToDb(driver);
-    await supabase.from('drivers_new').insert(row);
+    const { error } = await supabase.from('drivers_new').insert(row);
+    throwIfSupabaseError('addDriver', error);
 };
 
 export const bulkAddDrivers = async (_userId: string, drivers: Driver[]) => {
     const rows = drivers.map((d) => mapDriverToDb(d));
-    await supabase.from('drivers_new').insert(rows);
+    const { error } = await supabase.from('drivers_new').insert(rows);
+    throwIfSupabaseError('bulkAddDrivers', error);
 };
 
 export const updateDriver = async (_userId: string, driverId: string, updates: Partial<Driver>, _ownerId?: string) => {
     const { id, ...dbUpdates } = mapDriverToDb(updates) as any;
     const cleanUpdates = Object.fromEntries(Object.entries(dbUpdates).filter(([_, v]) => v !== undefined));
-    await supabase.from('drivers_new').update({
+    const { error } = await supabase.from('drivers_new').update({
         ...cleanUpdates,
         updated_at: new Date().toISOString()
     }).eq('id', driverId);
+    throwIfSupabaseError('updateDriver', error);
 };
 
 export const deleteDriver = async (_userId: string, driverId: string, _ownerId?: string) => {
-    await supabase.from('drivers_new').delete().eq('id', driverId);
+    const { error } = await supabase.from('drivers_new').delete().eq('id', driverId);
+    throwIfSupabaseError('deleteDriver', error);
 };
 
 export const fetchCompanies = async (boardId?: string): Promise<Company[]> => {
@@ -219,7 +277,8 @@ export const fetchCompanies = async (boardId?: string): Promise<Company[]> => {
         .select('id,name,board_id')
         .order('name', { ascending: true });
     if (boardId) query = query.eq('board_id', boardId);
-    const { data } = await query;
+    const { data, error } = await query;
+    throwIfSupabaseError('fetchCompanies', error);
     return (data || []).map((row: any) => ({
         id: row.id,
         name: row.name,
@@ -267,12 +326,14 @@ const mapDbToLog = (row: any): EmailLogEntry => ({
 } as EmailLogEntry);
 
 export const fetchEmailLogs = async (userId: string): Promise<EmailLogEntry[]> => {
-    const { data } = await supabase.from('email_logs').select('*').eq('user_id', userId).order('timestamp', { ascending: false });
+    const { data, error } = await supabase.from('email_logs').select('*').eq('user_id', userId).order('timestamp', { ascending: false });
+    throwIfSupabaseError('fetchEmailLogs', error);
     return (data || []).map(mapDbToLog);
 };
 
 export const addEmailLog = async (userId: string, log: EmailLogEntry) => {
-    await supabase.from('email_logs').insert(mapLogToDb(userId, log));
+    const { error } = await supabase.from('email_logs').insert(mapLogToDb(userId, log));
+    throwIfSupabaseError('addEmailLog', error);
 };
 
 const mapDbToReply = (row: any): DriverReply => ({
@@ -285,12 +346,13 @@ const mapDbToReply = (row: any): DriverReply => ({
 });
 
 export const fetchDriverReplies = async (userId: string): Promise<DriverReply[]> => {
-    const { data } = await supabase.from('driver_replies').select('*').eq('user_id', userId).order('timestamp', { ascending: false });
+    const { data, error } = await supabase.from('driver_replies').select('*').eq('user_id', userId).order('timestamp', { ascending: false });
+    throwIfSupabaseError('fetchDriverReplies', error);
     return (data || []).map(mapDbToReply);
 };
 
 export const addDriverReply = async (userId: string, reply: DriverReply) => {
-    await supabase.from('driver_replies').insert({
+    const { error } = await supabase.from('driver_replies').insert({
         id: reply.id,
         user_id: userId,
         driver_id: reply.driverId,
@@ -299,6 +361,7 @@ export const addDriverReply = async (userId: string, reply: DriverReply) => {
         timestamp: reply.timestamp,
         is_read: reply.isRead
     });
+    throwIfSupabaseError('addDriverReply', error);
 };
 
 export const subscribeToDrivers = (
@@ -307,10 +370,14 @@ export const subscribeToDrivers = (
     onEvent?: (eventType: DriverRealtimeEvent, driver?: Driver) => void
 ) => {
     let currentDrivers: Driver[] = [];
-    fetchDrivers(ownerId).then((rows) => {
-        currentDrivers = rows;
-        callback(rows);
-    });
+    fetchDrivers(ownerId)
+        .then((rows) => {
+            currentDrivers = rows;
+            callback(rows);
+        })
+        .catch((error) => {
+            console.error('[REALTIME] Initial driver fetch failed:', error);
+        });
 
     const channel = supabase.channel(`public:drivers_new:all`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'drivers_new' }, async (payload: any) => {
@@ -342,9 +409,13 @@ export const subscribeToDrivers = (
                 console.warn('[REALTIME] Optimistic patch failed, will reconcile with fetch.', error);
             }
 
-            const refreshed = await fetchDrivers(ownerId);
-            currentDrivers = refreshed;
-            callback(refreshed);
+            try {
+                const refreshed = await fetchDrivers(ownerId);
+                currentDrivers = refreshed;
+                callback(refreshed);
+            } catch (error) {
+                console.error('[REALTIME] Driver reconciliation fetch failed:', error);
+            }
         })
         .subscribe();
 

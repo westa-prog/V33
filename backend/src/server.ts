@@ -5,7 +5,7 @@ import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { getDb } from './services/supabaseAdmin';
+import { getDb, getSupabaseAdminConfigSummary } from './services/supabaseAdmin';
 import {
     getEmailTransportStatus,
     getSmtpConfigSummary,
@@ -99,6 +99,8 @@ const readUserMetadata = (user: any) => {
     };
 };
 const normalizeEmail = (value: unknown) => String(value || '').trim().toLowerCase();
+const normalizeCompanyName = (value: unknown) => String(value || '').trim().replace(/\s+/g, ' ');
+const normalizeCompanyList = (value: string[]) => value.map((item) => normalizeCompanyName(item).toLowerCase()).filter(Boolean);
 const normalizeRole = (value: unknown): 'admin' | 'employee' => {
     const role = String(value || '').trim().toLowerCase();
     return role === 'admin' ? 'admin' : 'employee';
@@ -282,11 +284,145 @@ const cleanupUploads = (files: Express.Multer.File[] = []) => {
     }
 };
 
-app.get('/api/status', (req, res) => {
+const findCompanyByNameAndBoard = async (
+    supabase: ReturnType<typeof getDb>,
+    companyName: string,
+    boardId: string
+) => {
+    const normalizedName = normalizeCompanyName(companyName).toLowerCase();
+    const { data, error } = await supabase
+        .from('companies')
+        .select('id,name,board_id')
+        .eq('normalized_name', normalizedName)
+        .eq('board_id', boardId)
+        .maybeSingle();
+
+    return { data: data || null, error: error || null };
+};
+
+const resolveCompanyForBoard = async (
+    supabase: ReturnType<typeof getDb>,
+    companyName: string,
+    boardId: string,
+    createdBy: string | null
+) => {
+    const normalizedCompany = normalizeCompanyName(companyName);
+    if (!normalizedCompany) {
+        return { companyId: null, companyName: '' };
+    }
+
+    const existing = await findCompanyByNameAndBoard(supabase, normalizedCompany, boardId);
+    if (existing.error) throw existing.error;
+    if (existing.data?.id) {
+        return { companyId: existing.data.id as string, companyName: existing.data.name as string };
+    }
+
+    const { data: insertedCompany, error: insertCompanyError } = await supabase
+        .from('companies')
+        .insert({
+            name: normalizedCompany,
+            board_id: boardId,
+            created_by: createdBy
+        })
+        .select('id,name,board_id')
+        .single();
+
+    if (!insertCompanyError && insertedCompany?.id) {
+        return { companyId: insertedCompany.id as string, companyName: insertedCompany.name as string };
+    }
+
+    const recovered = await findCompanyByNameAndBoard(supabase, normalizedCompany, boardId);
+    if (recovered.error) throw recovered.error;
+    if (recovered.data?.id) {
+        return { companyId: recovered.data.id as string, companyName: recovered.data.name as string };
+    }
+
+    throw new Error(insertCompanyError?.message || 'Failed to resolve target company.');
+};
+
+const checkTableReachable = async (supabase: ReturnType<typeof getDb>, table: string) => {
+    const { error } = await supabase.from(table).select('*', { head: true, count: 'exact' }).limit(1);
+    if (error) {
+        return { ok: false, error: error.message || `Failed to query ${table}` };
+    }
+    return { ok: true };
+};
+
+app.get('/api/status', async (req, res) => {
     const emailStatus = getEmailTransportStatus();
     const smtpSummary = getSmtpConfigSummary();
+    const supabaseConfig = getSupabaseAdminConfigSummary();
+    const warnings: string[] = [];
+
+    if (!APP_URL) warnings.push('APP_URL is not configured.');
+    if (supabaseConfig.usingAnonFallback) warnings.push('Backend is using SUPABASE_ANON_KEY fallback instead of service role.');
+    if (!emailStatus.liveEmailConfigured) warnings.push('No live email provider is configured. Email remains in simulation mode.');
+
+    const checks: Record<string, boolean> = {
+        appUrlConfigured: Boolean(APP_URL),
+        uploadsEnabled: true,
+        backendSupabaseConfigured: supabaseConfig.publishReady,
+        databaseReachable: false,
+        profilesTableReady: false,
+        companiesTableReady: false,
+        driversTableReady: false,
+        emailLogsTableReady: false,
+        driverRepliesTableReady: false,
+        employeeAssignmentsTableReady: false,
+        liveEmailConfigured: emailStatus.liveEmailConfigured
+    };
+
+    if (supabaseConfig.supabaseUrlConfigured) {
+        try {
+            const supabase = getDb();
+            const [
+                profilesCheck,
+                companiesCheck,
+                driversCheck,
+                emailLogsCheck,
+                driverRepliesCheck,
+                assignmentsCheck
+            ] = await Promise.all([
+                checkTableReachable(supabase, 'profiles'),
+                checkTableReachable(supabase, 'companies'),
+                checkTableReachable(supabase, 'drivers_new'),
+                checkTableReachable(supabase, 'email_logs'),
+                checkTableReachable(supabase, 'driver_replies'),
+                checkTableReachable(supabase, 'employee_assignments')
+            ]);
+
+            checks.profilesTableReady = profilesCheck.ok;
+            checks.companiesTableReady = companiesCheck.ok;
+            checks.driversTableReady = driversCheck.ok;
+            checks.emailLogsTableReady = emailLogsCheck.ok;
+            checks.driverRepliesTableReady = driverRepliesCheck.ok;
+            checks.employeeAssignmentsTableReady = assignmentsCheck.ok;
+            checks.databaseReachable = profilesCheck.ok || companiesCheck.ok || driversCheck.ok;
+
+            for (const result of [profilesCheck, companiesCheck, driversCheck, emailLogsCheck, driverRepliesCheck, assignmentsCheck]) {
+                if (!result.ok && result.error) warnings.push(result.error);
+            }
+        } catch (error: any) {
+            warnings.push(error?.message || 'Supabase connectivity check failed.');
+        }
+    }
+
+    const releaseReady =
+        checks.appUrlConfigured &&
+        checks.backendSupabaseConfigured &&
+        checks.databaseReachable &&
+        checks.profilesTableReady &&
+        checks.companiesTableReady &&
+        checks.driversTableReady &&
+        checks.emailLogsTableReady &&
+        checks.driverRepliesTableReady &&
+        checks.employeeAssignmentsTableReady &&
+        checks.liveEmailConfigured;
+
     res.json({
         status: 'online',
+        releaseReady,
+        checks,
         emailConfigured: emailStatus.liveEmailConfigured,
         emailMode: emailStatus.mode,
         smtpConfigured: emailStatus.smtpConfigured,
@@ -295,7 +431,8 @@ app.get('/api/status', (req, res) => {
         smtpPort: smtpSummary.port,
         smtpFrom: smtpSummary.from,
         uploadsEnabled: true,
-        uptimeSeconds: Math.round(process.uptime())
+        uptimeSeconds: Math.round(process.uptime()),
+        warnings: Array.from(new Set(warnings))
     });
 });
 
@@ -715,7 +852,7 @@ app.post('/api/drivers/create', async (req, res) => {
         const normalizedActingUserId = String(acting_user_id).trim();
         const normalizedName = String(name).trim();
         const normalizedEmail = String(email).trim().toLowerCase();
-        const normalizedCompany = String(company).trim();
+        const normalizedCompany = normalizeCompanyName(company);
         const normalizedBoardInput = normalizeBoardName(String(board || '').trim());
         const normalizedBoardId = normalizedBoardInput.toUpperCase().replace('BOARD ', '');
 
@@ -749,6 +886,7 @@ app.post('/api/drivers/create', async (req, res) => {
         let adminId = profile?.admin_id;
         let assignedBoards = pickAssignedBoards(profile);
         let assignedCompanies = pickAssignedCompanies(profile);
+        let assignedCompanySet = normalizeCompanyList(assignedCompanies);
 
         if (profileError || !profile) {
             const { data: userData, error: userErr } = await supabase.auth.admin.getUserById(normalizedActingUserId);
@@ -761,6 +899,7 @@ app.post('/api/drivers/create', async (req, res) => {
             adminId = meta.admin_id;
             assignedBoards = meta.assigned_boards;
             assignedCompanies = meta.assigned_companies;
+            assignedCompanySet = normalizeCompanyList(assignedCompanies);
             profileEmail = userData.user.email;
             profileId = userData.user.id;
         } else {
@@ -770,6 +909,7 @@ app.post('/api/drivers/create', async (req, res) => {
             adminId = adminId || meta.admin_id;
             if (assignedBoards.length === 0) assignedBoards = meta.assigned_boards;
             if (assignedCompanies.length === 0) assignedCompanies = meta.assigned_companies;
+            assignedCompanySet = normalizeCompanyList(assignedCompanies);
         }
 
         const isAdmin = role === 'admin' || String(profileEmail || '').toLowerCase() === ADMIN_EMAIL;
@@ -791,7 +931,7 @@ app.post('/api/drivers/create', async (req, res) => {
                 return;
             }
             effectiveBoard = normalizeBoardName(assignedBoards[0]) || 'Board A';
-            if (assignedCompanies.length > 0 && !assignedCompanies.includes(normalizedCompany)) {
+            if (assignedCompanySet.length > 0 && !assignedCompanySet.includes(normalizedCompany.toLowerCase())) {
                 res.status(403).json({ error: 'Employee cannot create drivers outside assigned companies.' });
                 return;
             }
@@ -809,33 +949,35 @@ app.post('/api/drivers/create', async (req, res) => {
             .eq('id', normalizedActingUserId)
             .is('board_id', null);
 
+        const targetBoardId = normalizedBoardId || effectiveBoardId;
         let resolvedCompanyId: string | null = null;
+        let resolvedCompanyName = normalizedCompany;
         if (company_id && isUuid(String(company_id))) {
             resolvedCompanyId = String(company_id);
         } else {
-            const targetBoardId = normalizedBoardId || effectiveBoardId;
-            const { data: existingCompany } = await supabase
-                .from('companies')
-                .select('id')
-                .eq('name', normalizedCompany)
-                .eq('board_id', targetBoardId)
-                .maybeSingle();
-            if (existingCompany?.id) {
-                resolvedCompanyId = existingCompany.id;
-            } else {
-                const { data: insertedCompany, error: insertCompanyError } = await supabase
-                    .from('companies')
-                    .insert({
-                        name: normalizedCompany,
-                        board_id: targetBoardId,
-                        created_by: isAdmin ? profileId : adminId
-                    })
-                    .select('id')
-                    .single();
-                if (!insertCompanyError && insertedCompany?.id) {
-                    resolvedCompanyId = insertedCompany.id;
-                }
-            }
+            const resolvedCompany = await resolveCompanyForBoard(
+                supabase,
+                normalizedCompany,
+                targetBoardId,
+                isAdmin ? profileId : adminId
+            );
+            resolvedCompanyId = resolvedCompany.companyId;
+            resolvedCompanyName = resolvedCompany.companyName || normalizedCompany;
+        }
+
+        const { data: duplicateDriver } = await supabase
+            .from('drivers_new')
+            .select('id,name,email,board_id,company_id')
+            .eq('email', normalizedEmail)
+            .eq('board_id', effectiveBoardId)
+            .maybeSingle();
+
+        if (duplicateDriver?.id) {
+            res.status(409).json({
+                error: `A driver with email ${normalizedEmail} already exists on ${effectiveBoard}.`,
+                driverId: duplicateDriver.id
+            });
+            return;
         }
 
         const nowIso = new Date().toISOString();
@@ -879,7 +1021,7 @@ app.post('/api/drivers/create', async (req, res) => {
         }
 
         const actorLabel = profile?.name || profileEmail || profileId;
-        const activityContent = `[ACTIVITY] ${actorLabel} created driver ${normalizedName} (${normalizedEmail}) in ${normalizedCompany}, ${effectiveBoard}`;
+        const activityContent = `[ACTIVITY] ${actorLabel} created driver ${normalizedName} (${normalizedEmail}) in ${resolvedCompanyName}, ${effectiveBoard}`;
         await supabase.from('email_logs').insert({
             id: crypto.randomUUID(),
             user_id: ownerUserId,
@@ -898,15 +1040,289 @@ app.post('/api/drivers/create', async (req, res) => {
                 id: driverId,
                 name: normalizedName,
                 email: normalizedEmail,
-                company_id: resolvedCompanyId,
-                board_id: effectiveBoardId,
-                company: normalizedCompany,
-                board: effectiveBoard
+                companyId: resolvedCompanyId,
+                boardId: effectiveBoardId,
+                company: resolvedCompanyName,
+                board: effectiveBoard,
+                createdBy: normalizedActingUserId,
+                deviceType: String(deviceType || ''),
+                appVersion: String(appVersion || ''),
+                eldStatus: String(eldStatus || 'Connected'),
+                dutyStatus: String(dutyStatus || 'Not Set'),
+                followUp: String(followUp || 'None'),
+                emailSent: false,
+                hasPendingAlert: false
             }
         });
     } catch (e: any) {
         console.error('[API] Driver create failed:', e);
         res.status(500).json({ error: e.message || 'Failed to create driver.' });
+    }
+});
+
+app.patch('/api/drivers/:driverId', async (req, res) => {
+    try {
+        const driverId = String(req.params.driverId || '').trim();
+        const {
+            acting_user_id,
+            name,
+            email,
+            company,
+            company_id,
+            board,
+            deviceType,
+            appVersion,
+            eldStatus,
+            dutyStatus,
+            followUp,
+            emailSent,
+            hasPendingAlert,
+            lastEmailTime,
+            lastSentAt,
+            lastPFUpdate,
+            lastProfileReminderAt,
+            last3DayEmail,
+            last5DayEmail
+        } = req.body || {};
+
+        if (!isUuid(driverId) || !isUuid(String(acting_user_id || '').trim())) {
+            res.status(400).json({ error: 'Valid driverId and acting_user_id are required.' });
+            return;
+        }
+
+        const actingUserId = String(acting_user_id).trim();
+        const supabase = getDb();
+
+        const { data: profile, error: profileError } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', actingUserId)
+            .single();
+
+        let role = profile?.role;
+        let profileEmail = profile?.email;
+        let adminId = profile?.admin_id || null;
+        let assignedBoards = pickAssignedBoards(profile);
+        let assignedCompanies = pickAssignedCompanies(profile);
+        let assignedCompanySet = normalizeCompanyList(assignedCompanies);
+
+        if (profileError || !profile) {
+            const { data: userData, error: userErr } = await supabase.auth.admin.getUserById(actingUserId);
+            if (userErr || !userData?.user) {
+                res.status(403).json({ error: 'Unable to resolve acting user profile.' });
+                return;
+            }
+            const meta = readUserMetadata(userData.user);
+            role = meta.role;
+            adminId = meta.admin_id || null;
+            assignedBoards = meta.assigned_boards;
+            assignedCompanies = meta.assigned_companies;
+            assignedCompanySet = normalizeCompanyList(assignedCompanies);
+            profileEmail = userData.user.email;
+        } else {
+            const { data: userData } = await supabase.auth.admin.getUserById(actingUserId);
+            const meta = readUserMetadata(userData?.user);
+            role = role || meta.role;
+            adminId = adminId || meta.admin_id || null;
+            if (assignedBoards.length === 0) assignedBoards = meta.assigned_boards;
+            if (assignedCompanies.length === 0) assignedCompanies = meta.assigned_companies;
+            assignedCompanySet = normalizeCompanyList(assignedCompanies);
+        }
+
+        const isAdmin = role === 'admin' || String(profileEmail || '').toLowerCase() === ADMIN_EMAIL;
+
+        const { data: existingDriver, error: driverError } = await supabase
+            .from('drivers_new')
+            .select('*, companies(id,name,board_id)')
+            .eq('id', driverId)
+            .single();
+
+        if (driverError || !existingDriver) {
+            res.status(404).json({ error: 'Driver not found.' });
+            return;
+        }
+
+        const currentBoardName = normalizeBoardName(existingDriver.board_id || existingDriver.companies?.board_id || '');
+        const currentCompanyName = String(existingDriver.companies?.name || '').trim();
+
+        if (!isAdmin) {
+            if (assignedBoards.length === 0) {
+                res.status(403).json({ error: 'Employee has no assigned boards.' });
+                return;
+            }
+
+            const normalizedAssignedBoards = assignedBoards.map(normalizeBoardName).filter(Boolean);
+            if (currentBoardName && !normalizedAssignedBoards.includes(currentBoardName)) {
+                res.status(403).json({ error: 'Employee cannot update drivers outside assigned boards.' });
+                return;
+            }
+
+            if (assignedCompanySet.length > 0 && currentCompanyName && !assignedCompanySet.includes(normalizeCompanyName(currentCompanyName).toLowerCase())) {
+                res.status(403).json({ error: 'Employee cannot update drivers outside assigned companies.' });
+                return;
+            }
+        }
+
+        const updates: Record<string, unknown> = {
+            updated_at: new Date().toISOString()
+        };
+
+        if (typeof name === 'string') {
+            const normalizedName = name.trim();
+            if (normalizedName.length < 2) {
+                res.status(400).json({ error: 'Driver name must be at least 2 characters.' });
+                return;
+            }
+            updates.name = normalizedName;
+        }
+
+        if (typeof email === 'string') {
+            const normalizedEmail = email.trim().toLowerCase();
+            if (!isValidEmail(normalizedEmail)) {
+                res.status(400).json({ error: 'A valid driver email is required.' });
+                return;
+            }
+            updates.email = normalizedEmail;
+        }
+
+        let effectiveBoard = typeof board === 'string' ? normalizeBoardName(board) : currentBoardName;
+        if (!effectiveBoard) {
+            effectiveBoard = normalizeBoardName(existingDriver.board_id || '') || 'Board A';
+        }
+
+        if (!isAdmin) {
+            effectiveBoard = normalizeBoardName(assignedBoards[0]) || effectiveBoard;
+        } else if (board !== undefined && !ALLOWED_BOARDS.has(effectiveBoard)) {
+            res.status(400).json({ error: 'Only Board A, Board B, or Board C are allowed.' });
+            return;
+        }
+
+        const effectiveBoardId = boardNameToId(effectiveBoard);
+        if (!effectiveBoardId) {
+            res.status(400).json({ error: 'Invalid board mapping.' });
+            return;
+        }
+        updates.board_id = effectiveBoardId;
+
+        let resolvedCompanyId = existingDriver.company_id || null;
+        let resolvedCompanyName = currentCompanyName;
+        if (company_id === null) {
+            resolvedCompanyId = null;
+        } else if (typeof company_id === 'string' && isUuid(company_id)) {
+            resolvedCompanyId = company_id;
+            const { data: targetCompanyById } = await supabase
+                .from('companies')
+                .select('id,name,board_id')
+                .eq('id', company_id)
+                .maybeSingle();
+            resolvedCompanyName = targetCompanyById?.name || resolvedCompanyName;
+        } else if (typeof company === 'string') {
+            const normalizedCompany = normalizeCompanyName(company);
+            if (normalizedCompany.length < 2) {
+                res.status(400).json({ error: 'Company is required.' });
+                return;
+            }
+            if (!isAdmin && assignedCompanySet.length > 0 && !assignedCompanySet.includes(normalizedCompany.toLowerCase())) {
+                res.status(403).json({ error: 'Employee cannot move drivers outside assigned companies.' });
+                return;
+            }
+
+            const resolvedCompany = await resolveCompanyForBoard(
+                supabase,
+                normalizedCompany,
+                effectiveBoardId,
+                existingDriver.created_by || actingUserId
+            );
+
+            if (!resolvedCompany.companyId) {
+                res.status(400).json({ error: 'Target company was not found for the selected board.' });
+                return;
+            }
+
+            resolvedCompanyId = resolvedCompany.companyId;
+            resolvedCompanyName = resolvedCompany.companyName || normalizedCompany;
+        }
+
+        updates.company_id = resolvedCompanyId;
+
+        const nextEmail = typeof email === 'string' ? email.trim().toLowerCase() : String(existingDriver.email || '').trim().toLowerCase();
+        const { data: duplicateDriver } = await supabase
+            .from('drivers_new')
+            .select('id')
+            .eq('email', nextEmail)
+            .eq('board_id', effectiveBoardId)
+            .neq('id', driverId)
+            .maybeSingle();
+
+        if (duplicateDriver?.id) {
+            res.status(409).json({ error: `A driver with email ${nextEmail} already exists on ${effectiveBoard}.` });
+            return;
+        }
+
+        if (deviceType !== undefined) updates.devicetype = String(deviceType || '');
+        if (appVersion !== undefined) updates.appversion = String(appVersion || '');
+        if (eldStatus !== undefined) updates.eldstatus = eldStatus ? String(eldStatus) : null;
+        if (dutyStatus !== undefined) updates.dutystatus = dutyStatus ? String(dutyStatus) : null;
+        if (followUp !== undefined) updates.followup = followUp ? String(followUp) : null;
+        if (emailSent !== undefined) updates.emailsent = Boolean(emailSent);
+        if (hasPendingAlert !== undefined) updates.haspendingalert = Boolean(hasPendingAlert);
+        if (lastEmailTime !== undefined) updates.lastemailtime = lastEmailTime || null;
+        if (lastSentAt !== undefined) updates.lastsentat = lastSentAt || null;
+        if (lastPFUpdate !== undefined) updates.lastpfupdate = lastPFUpdate || null;
+        if (lastProfileReminderAt !== undefined) updates.lastprofilereminderat = lastProfileReminderAt || null;
+        if (last3DayEmail !== undefined) updates.last3dayemail = last3DayEmail || null;
+        if (last5DayEmail !== undefined) updates.last5dayemail = last5DayEmail || null;
+
+        const { error: updateError } = await supabase
+            .from('drivers_new')
+            .update(updates)
+            .eq('id', driverId);
+
+        if (updateError) {
+            res.status(500).json({ error: updateError.message || 'Failed to update driver.' });
+            return;
+        }
+
+        const { data: refreshedDriver, error: refreshedError } = await supabase
+            .from('drivers_new')
+            .select('*, companies(id,name,board_id)')
+            .eq('id', driverId)
+            .single();
+
+        if (refreshedError || !refreshedDriver) {
+            res.status(500).json({ error: refreshedError?.message || 'Driver updated but failed to reload.' });
+            return;
+        }
+
+        res.json({
+            success: true,
+            driver: {
+                id: refreshedDriver.id,
+                name: refreshedDriver.name,
+                email: refreshedDriver.email,
+                company: refreshedDriver.companies?.name || resolvedCompanyName || existingDriver.companies?.name || '',
+                companyId: refreshedDriver.company_id || existingDriver.company_id || null,
+                board: normalizeBoardName(refreshedDriver.board_id || refreshedDriver.companies?.board_id || existingDriver.board_id || existingDriver.companies?.board_id || ''),
+                boardId: refreshedDriver.board_id || existingDriver.board_id || null,
+                createdBy: refreshedDriver.created_by || existingDriver.created_by || null,
+                deviceType: refreshedDriver.devicetype || '',
+                appVersion: refreshedDriver.appversion || '',
+                eldStatus: refreshedDriver.eldstatus || null,
+                dutyStatus: refreshedDriver.dutystatus || null,
+                followUp: refreshedDriver.followup || null,
+                emailSent: Boolean(refreshedDriver.emailsent),
+                hasPendingAlert: Boolean(refreshedDriver.haspendingalert),
+                lastEmailTime: refreshedDriver.lastemailtime || null,
+                lastSentAt: refreshedDriver.lastsentat || null,
+                lastPFUpdate: refreshedDriver.lastpfupdate || null,
+                lastProfileReminderAt: refreshedDriver.lastprofilereminderat || null,
+                last3DayEmail: refreshedDriver.last3dayemail || null,
+                last5DayEmail: refreshedDriver.last5dayemail || null
+            }
+        });
+    } catch (e: any) {
+        console.error('[API] Driver update failed:', e);
+        res.status(500).json({ error: e.message || 'Failed to update driver.' });
     }
 });
 
