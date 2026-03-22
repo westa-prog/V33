@@ -75,6 +75,8 @@ export const DriverTable: React.FC<DriverTableProps> = ({
   const [sendingId, setSendingId] = useState<string | null>(null);
 
   const handleSendFollowUp = async (driverId: string) => {
+    const confirmed = window.confirm('Send alert email now?');
+    if (!confirmed) return;
     setSendingId(driverId);
     try {
       await onManualSendEmail(driverId);
@@ -673,7 +675,7 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                     )}
                     {driver.hasPendingAlert ? (
                       <button
-                        onClick={() => onManualSendEmail(driver.id)}
+                        onClick={() => handleSendFollowUp(driver.id)}
                         className="flex items-center gap-1.5 px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-[10px] font-black rounded-full shadow-lg animate-bounce transition-all active:scale-90"
                       >
                         <Mail className="w-3 h-3" />

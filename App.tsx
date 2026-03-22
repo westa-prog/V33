@@ -994,6 +994,14 @@ const App: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-4">
+          <div className={`hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-bold ${
+            user
+              ? 'bg-emerald-50 dark:bg-emerald-900/30 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
+              : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
+          }`}>
+            <span className={`inline-block w-2 h-2 rounded-full ${user ? 'bg-emerald-500' : 'bg-slate-400'}`}></span>
+            Google {user ? 'Connected' : 'Disconnected'}
+          </div>
           {!user && (
             <button
               onClick={handleGoogleLogin}

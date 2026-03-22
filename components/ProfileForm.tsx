@@ -152,7 +152,7 @@ export const ProfileForm: React.FC<ProfileFormProps> = ({ drivers, emailLogs, on
             await onSendReminder(driver.id, days);
         } catch (e) {
             console.error(e);
-            alert("Failed to send reminder to " + driver.name + ". Ensure you are connected to Google.");
+            alert("Failed to send reminder to " + driver.name + ". Check Live Mode and backend SMTP configuration.");
         } finally {
             setSendingState(null);
         }
