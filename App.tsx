@@ -28,7 +28,6 @@ import {
 } from './services/supabaseService';
 import { sendGmailMessage, fetchGmailReplies } from './services/gmailService';
 import { Sidebar } from './components/Sidebar';
-import { AnimatedText } from './components/ui/animated-text';
 import { HeroBackground } from './components/ui/shape-landing-hero';
 import { supabase } from './supabase';
 
@@ -120,11 +119,7 @@ import {
   MessageSquare,
   TrendingUp,
   Sparkles,
-  ChevronLeft,
-  ChevronRight,
   Menu,
-  Moon,
-  Sun,
   ShieldCheck,
   AlertTriangle,
   RefreshCcw,
@@ -135,57 +130,6 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGoogleLogin } from '@react-oauth/google';
 import { Toaster, toast } from 'react-hot-toast';
-
-const BrandLogo = ({ open, onToggle, theme, onToggleTheme }: { open: boolean, onToggle: () => void, theme: 'light' | 'dark', onToggleTheme: () => void }) => (
-  <div className="flex items-center justify-between gap-3 mb-8 px-2 relative">
-    <div className="flex items-center gap-3 overflow-hidden">
-      <div className="relative flex items-center justify-center w-10 h-10 shrink-0">
-        <div className="absolute inset-0 rounded-full border-[1.5px] border-purple-400 opacity-60"></div>
-        <div className="absolute inset-1 rounded-full border-[1px] border-purple-500 opacity-40 animate-pulse"></div>
-        <svg viewBox="0 0 100 100" className="w-6 h-6 z-10">
-          <defs>
-            <linearGradient id="logoGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" style={{ stopColor: '#a855f7', stopOpacity: 1 }} />
-              <stop offset="100%" style={{ stopColor: '#6b21a8', stopOpacity: 1 }} />
-            </linearGradient>
-          </defs>
-          <path
-            d="M35 25 L35 75 L75 75 L75 62 L48 62 L48 25 Z"
-            fill="url(#logoGrad)"
-            stroke="none"
-          />
-        </svg>
-      </div>
-      {open && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="whitespace-nowrap"
-        >
-          <h1 className="text-xl font-bold tracking-tight text-white leading-none">Leader A1</h1>
-          <p className="text-[10px] text-purple-400 font-bold uppercase tracking-wider">Fleet Monitor</p>
-        </motion.div>
-      )}
-    </div>
-
-    <div className="flex items-center gap-1">
-      <button
-        onClick={onToggleTheme}
-        className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-all border border-transparent hover:border-slate-700"
-        title={theme === 'light' ? "Night Mode" : "Day Mode"}
-      >
-        {theme === 'light' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4 text-yellow-400" />}
-      </button>
-      <button
-        onClick={onToggle}
-        className="hidden md:flex p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-all border border-transparent hover:border-slate-700"
-        title={open ? "Collapse Sidebar" : "Expand Sidebar"}
-      >
-        {open ? <ChevronLeft className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
-      </button>
-    </div>
-  </div>
-);
 
 const App: React.FC = () => {
   const [drivers, setDrivers] = useState<Driver[]>(() => readJsonStorage(STORAGE_KEYS.drivers, INITIAL_DRIVERS));
@@ -1058,18 +1002,10 @@ const App: React.FC = () => {
       )}
       
       <div className="flex-1 flex flex-col h-screen overflow-hidden relative">
-        <header className="app-header flex-none flex items-center justify-between px-6 py-4 bg-white dark:bg-slate-900/60 backdrop-blur-md border-b border-slate-200 dark:border-slate-800/60 z-30 shadow-sm relative">
-        <div className="flex items-center gap-6">
-          <BrandLogo open={true} onToggle={() => {}} theme={theme} onToggleTheme={toggleTheme} />
-        </div>
-
-        <div className="flex items-center gap-4"></div>
-      </header>
-
       <main className="flex-1 overflow-y-auto p-4 md:p-8 pb-32">
         <header className="flex items-center justify-between mb-8 pl-2">
           <div className="flex flex-col items-start gap-1">
-            <AnimatedText text="Leader Control" as="h2" textClassName="text-3xl text-slate-900 dark:text-white" underlineGradient="from-indigo-600 to-purple-600 dark:from-indigo-400 dark:to-purple-400" underlineHeight="h-[3px]" underlineOffset="-bottom-2" className="items-start" />
+            <h2 className="text-3xl font-black text-slate-900 dark:text-white">Leader Control</h2>
             <p className="text-slate-500 text-sm mt-3">Welcome back, {authUser?.name || 'Guest'}</p>
           </div>
           {isAdminUser && (

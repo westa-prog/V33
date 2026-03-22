@@ -1,10 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Driver, ELDStatus } from '../types';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
-import { Mail, Monitor, RefreshCw, Server, Smartphone, Tablet } from 'lucide-react';
+import { Mail, RefreshCw, Server } from 'lucide-react';
 import axios from 'axios';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Map, MapControls } from './ui/map';
 import { HorizonHeroSection } from './ui/horizon-hero-section';
 
 interface DashboardProps {
@@ -23,7 +21,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, em
     const apiUrl = (path: string) => effectiveApiBaseUrl ? `${effectiveApiBaseUrl}${path}` : path;
 
     const [boardFilter, setBoardFilter] = useState<string | 'ALL'>('ALL');
-    const [previewMode, setPreviewMode] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
     const [backendStatus, setBackendStatus] = useState<{
         status: string;
         emailConfigured: boolean;
@@ -34,31 +31,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, em
     } | null>(null);
     const [statusLoading, setStatusLoading] = useState(false);
 
-    const boards = Array.from(new Set(drivers.map(d => d.board).filter(Boolean)));
+    const boards = Array.from(new Set(drivers.map((d) => d.board).filter(Boolean)));
 
     const filteredDrivers = useMemo(() => {
         if (assignedBoard) return drivers;
         if (boardFilter === 'ALL') return drivers;
-        return drivers.filter(d => d.board === boardFilter);
+        return drivers.filter((d) => d.board === boardFilter);
     }, [drivers, boardFilter, assignedBoard]);
 
     const totalDrivers = filteredDrivers.length;
-    const activeDrivers = filteredDrivers.filter(d => d.eldStatus === ELDStatus.CONNECTED).length;
-    const inactiveDrivers = filteredDrivers.filter(d => d.eldStatus === ELDStatus.DISCONNECTED).length;
+    const activeDrivers = filteredDrivers.filter((d) => d.eldStatus === ELDStatus.CONNECTED).length;
+    const inactiveDrivers = filteredDrivers.filter((d) => d.eldStatus === ELDStatus.DISCONNECTED).length;
     const boardViolations = filteredDrivers.filter(
         (d) => d.eldStatus === ELDStatus.DISCONNECTED && ['Driving', 'On Duty'].includes(d.dutyStatus || '')
     ).length;
     const motivationalCopy = [
-        "Small improvements compound into reliable operations.",
-        "Consistency beats intensity in fleet performance.",
-        "Clear updates keep your board moving."
+        'Small improvements compound into reliable operations.',
+        'Consistency beats intensity in fleet performance.',
+        'Clear updates keep your board moving.'
     ];
 
     const connectionStats = useMemo(() => {
         return [
             { name: 'Connected', value: activeDrivers },
             { name: 'Disconnected', value: inactiveDrivers }
-        ].filter(stat => stat.value > 0);
+        ].filter((stat) => stat.value > 0);
     }, [activeDrivers, inactiveDrivers]);
 
     const dutyStats = useMemo(() => {
@@ -127,30 +124,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, em
                     <p className="text-sm text-slate-500 dark:text-slate-400">Fleet overview plus backend readiness for messaging and admin tools.</p>
                 </div>
                 <div className="flex items-center gap-4">
-                    <div className="flex items-center bg-slate-100 dark:bg-slate-950 p-1 rounded-lg border border-slate-200 dark:border-slate-800">
-                        <button
-                            onClick={() => setPreviewMode('desktop')}
-                            className={`p-1.5 rounded-md transition-colors ${previewMode === 'desktop' ? 'bg-white dark:bg-slate-800 shadow-sm text-indigo-600 dark:text-indigo-400' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
-                            title="Desktop View"
-                        >
-                            <Monitor className="w-4 h-4" />
-                        </button>
-                        <button
-                            onClick={() => setPreviewMode('tablet')}
-                            className={`p-1.5 rounded-md transition-colors ${previewMode === 'tablet' ? 'bg-white dark:bg-slate-800 shadow-sm text-indigo-600 dark:text-indigo-400' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
-                            title="Tablet View"
-                        >
-                            <Tablet className="w-4 h-4" />
-                        </button>
-                        <button
-                            onClick={() => setPreviewMode('mobile')}
-                            className={`p-1.5 rounded-md transition-colors ${previewMode === 'mobile' ? 'bg-white dark:bg-slate-800 shadow-sm text-indigo-600 dark:text-indigo-400' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
-                            title="Mobile View"
-                        >
-                            <Smartphone className="w-4 h-4" />
-                        </button>
-                    </div>
-
                     {assignedBoard ? (
                         <div className="flex items-center gap-2 px-3 py-2 bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-800 rounded-lg">
                             <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
@@ -163,7 +136,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, em
                             className="text-sm border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-950 dark:text-slate-300 px-4 py-2 outline-none shadow-sm focus:ring-2 focus:ring-indigo-500 font-bold"
                         >
                             <option value="ALL">All Boards</option>
-                            {boards.map(b => (
+                            {boards.map((b) => (
                                 <option key={b} value={b}>{b}</option>
                             ))}
                         </select>
@@ -171,12 +144,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, em
                 </div>
             </div>
 
-            <div className={`transition-all duration-300 ease-in-out mx-auto ${
-                previewMode === 'mobile' ? 'max-w-[400px]' :
-                previewMode === 'tablet' ? 'max-w-[768px]' : 'max-w-full'
-            }`}>
-                <div className={`grid grid-cols-1 gap-6 mt-6 ${previewMode === 'desktop' ? 'lg:grid-cols-2' : ''}`}>
-                    <div className="flex flex-col gap-6">
+            <div className="mx-auto max-w-full">
+                <div className="grid grid-cols-1 gap-6 mt-6">
+                    <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-6">
                         <div className="bg-white/90 dark:bg-slate-900/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col min-h-[350px]">
                             <h3 className="text-sm font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-6">Connection Status Overview</h3>
                             <div className="relative h-[260px] md:h-[290px] min-w-0">
@@ -214,49 +184,36 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, em
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-6">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-6">
                             <div className="bg-white/90 dark:bg-slate-900/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col items-center justify-center relative overflow-hidden group">
-                                <h3 className="text-sm font-bold text-slate-500 dark:text-slate-400 mb-2">Inactive Driver's</h3>
+                                <h3 className="text-sm font-bold text-slate-500 dark:text-slate-400 mb-2">Inactive Drivers</h3>
                                 <div className="text-5xl font-black text-slate-800 dark:text-white mb-2">{inactiveDrivers}</div>
                             </div>
                             <div className="bg-white/90 dark:bg-slate-900/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col items-center justify-center relative overflow-hidden group">
-                                <h3 className="text-sm font-bold text-slate-500 dark:text-slate-400 mb-2">Active Driver's</h3>
+                                <h3 className="text-sm font-bold text-slate-500 dark:text-slate-400 mb-2">Active Drivers</h3>
                                 <div className="text-5xl font-black text-slate-800 dark:text-white mb-2">{activeDrivers}</div>
-                            </div>
-                        </div>
-
-                        <div className="bg-white/90 dark:bg-slate-900/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 flex-1 min-h-[300px] flex flex-col">
-                            <h3 className="text-sm font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-6">Duty Status Distribution</h3>
-                            <div className="relative h-[240px] md:h-[280px] min-w-0">
-                                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={200}>
-                                    <BarChart data={dutyStats} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" opacity={0.2} />
-                                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 'bold' }} dy={10} />
-                                        <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 'bold' }} />
-                                        <Tooltip cursor={{ fill: 'rgba(99, 102, 241, 0.1)' }} contentStyle={{ borderRadius: '12px', border: 'none', background: '#1e293b', color: '#fff' }} />
-                                        <Bar dataKey="Total" fill="#6366f1" radius={[4, 4, 0, 0]} maxBarSize={50}>
-                                            {dutyStats.map((entry, index) => (
-                                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                            ))}
-                                        </Bar>
-                                    </BarChart>
-                                </ResponsiveContainer>
                             </div>
                         </div>
                     </div>
 
-                    <Card className="flex flex-col border-slate-200 dark:border-slate-800 bg-white/50 dark:bg-slate-900/60 shadow-sm backdrop-blur-sm min-h-[600px] h-full">
-                        <CardHeader className="pb-4">
-                            <CardTitle className="text-lg text-slate-900 dark:text-white flex items-center gap-2">US Connected Fleet Traffic</CardTitle>
-                        </CardHeader>
-                        <CardContent className="flex-1 p-0 px-6 pb-6">
-                            <div className="h-full w-full min-h-[500px] rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800">
-                                <Map center={[-98.5795, 39.8283]} zoom={4}>
-                                    <MapControls position="bottom-right" showZoom showCompass showFullscreen />
-                                </Map>
-                            </div>
-                        </CardContent>
-                    </Card>
+                    <div className="bg-white/90 dark:bg-slate-900/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 min-h-[300px] flex flex-col">
+                        <h3 className="text-sm font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-6">Duty Status Distribution</h3>
+                        <div className="relative h-[260px] md:h-[320px] min-w-0">
+                            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={200}>
+                                <BarChart data={dutyStats} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" opacity={0.2} />
+                                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 'bold' }} dy={10} />
+                                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 'bold' }} />
+                                    <Tooltip cursor={{ fill: 'rgba(99, 102, 241, 0.1)' }} contentStyle={{ borderRadius: '12px', border: 'none', background: '#1e293b', color: '#fff' }} />
+                                    <Bar dataKey="Total" fill="#6366f1" radius={[4, 4, 0, 0]} maxBarSize={50}>
+                                        {dutyStats.map((entry, index) => (
+                                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                        ))}
+                                    </Bar>
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
                 </div>
 
                 <div className="mt-8 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm">
