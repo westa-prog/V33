@@ -154,8 +154,13 @@ To get instant admin/user updates without refresh:
 
 1. In Supabase Dashboard, open `Database -> Replication`.
 2. Ensure realtime replication is enabled for:
+   - `public.boards`
+   - `public.driver_replies`
    - `public.drivers`
-   - (optional for future normalized model) `public.drivers_new`
+   - `public.drivers_new`
+   - `public.email_logs`
+   - `public.employee_assignments`
+   - `public.profiles`
 3. Keep RLS policies enabled and valid; realtime respects RLS visibility.
 4. Verify in-app behavior:
    - create/update/delete a driver in one session
@@ -163,9 +168,9 @@ To get instant admin/user updates without refresh:
 
 Implementation note:
 
-- Frontend uses hybrid realtime handling:
-  - instant optimistic patch from realtime payload
-  - then full `fetchDrivers()` reconciliation for consistency
+- Frontend uses event-first realtime handling:
+  - apply the realtime payload immediately
+  - only fall back to a full `fetchDrivers()` reconciliation if event hydration fails
 
 ## 7) Rollback Notes
 

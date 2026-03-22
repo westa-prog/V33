@@ -202,8 +202,35 @@ const mapDbToDriver = (dbRow: any, creatorMap?: Record<string, { name?: string; 
         lastPFUpdate: dbRow.lastpfupdate || undefined,
         lastProfileReminderAt: dbRow.lastprofilereminderat || undefined,
         last3DayEmail: dbRow.last3dayemail || undefined,
-        last5DayEmail: dbRow.last5dayemail || undefined
+        last5DayEmail: dbRow.last5dayemail || undefined,
+        updatedAt: dbRow.updated_at || dbRow.updatedAt || null
     } as Driver;
+};
+
+const parseRealtimeTimestamp = (value?: string | null): number => {
+    if (!value) return 0;
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const isIncomingDriverNewer = (currentDriver: Driver | undefined, incomingDriver: Driver): boolean => {
+    if (!currentDriver) return true;
+    return parseRealtimeTimestamp(incomingDriver.updatedAt) >= parseRealtimeTimestamp(currentDriver.updatedAt);
+};
+
+const upsertRealtimeDriver = (drivers: Driver[], incomingDriver: Driver, mode: 'INSERT' | 'UPDATE'): Driver[] => {
+    const existingDriver = drivers.find((driver) => driver.id === incomingDriver.id);
+    if (!existingDriver) {
+        return mode === 'INSERT'
+            ? [incomingDriver, ...drivers]
+            : [incomingDriver, ...drivers];
+    }
+
+    if (!isIncomingDriverNewer(existingDriver, incomingDriver)) {
+        return drivers;
+    }
+
+    return drivers.map((driver) => driver.id === incomingDriver.id ? incomingDriver : driver);
 };
 
 const hydrateCreatorMap = async (rows: any[]) => {
@@ -230,6 +257,69 @@ const fetchDriverRecord = async (driverId: string) => {
         .maybeSingle();
     throwIfSupabaseError('fetchDriverRecord', error);
     return data || null;
+};
+
+const buildRealtimeDriver = async (sourceRow: any, currentDrivers: Driver[]): Promise<Driver> => {
+    const driverId = String(sourceRow?.id || '').trim();
+    const existingDriver = currentDrivers.find((driver) => driver.id === driverId);
+    const sourceCompanyId = sourceRow?.company_id || sourceRow?.companyId || null;
+    const sourceCreatedBy = sourceRow?.created_by || sourceRow?.createdBy || existingDriver?.createdBy || null;
+
+    let hydratedRow = {
+        ...sourceRow,
+        created_by: sourceCreatedBy,
+        companies: sourceRow?.companies
+            || (
+                existingDriver?.companyId
+                && existingDriver.companyId === sourceCompanyId
+                && existingDriver.company
+                    ? {
+                        id: existingDriver.companyId,
+                        name: existingDriver.company,
+                        board_id: existingDriver.boardId || null
+                    }
+                    : undefined
+            ),
+        company: sourceRow?.company || sourceRow?.companyName
+            || (
+                existingDriver?.companyId
+                && existingDriver.companyId === sourceCompanyId
+                    ? existingDriver.company
+                    : ''
+            )
+    };
+
+    const missingCompanyName = Boolean(
+        driverId
+        && sourceCompanyId
+        && !(hydratedRow.companies?.name || hydratedRow.company || hydratedRow.companyName)
+    );
+
+    if (missingCompanyName) {
+        const fullRow = await fetchDriverRecord(driverId);
+        if (fullRow) {
+            hydratedRow = fullRow;
+        }
+    }
+
+    let creatorMap: Record<string, { name?: string; email?: string }> = {};
+    if (sourceCreatedBy) {
+        if (
+            existingDriver?.createdBy === sourceCreatedBy
+            && (existingDriver.createdByName || existingDriver.createdByEmail)
+        ) {
+            creatorMap = {
+                [sourceCreatedBy]: {
+                    name: existingDriver.createdByName || undefined,
+                    email: existingDriver.createdByEmail || undefined
+                }
+            };
+        } else {
+            creatorMap = await hydrateCreatorMap([hydratedRow]);
+        }
+    }
+
+    return mapDbToDriver(hydratedRow, creatorMap);
 };
 
 export const fetchDrivers = async (_ownerId: string): Promise<Driver[]> => {
@@ -370,32 +460,30 @@ export const subscribeToDrivers = (
     onEvent?: (eventType: DriverRealtimeEvent, driver?: Driver) => void
 ) => {
     let currentDrivers: Driver[] = [];
-    fetchDrivers(ownerId)
-        .then((rows) => {
+
+    const reconcileDrivers = async (scope: 'initial' | 'recovery') => {
+        try {
+            const rows = await fetchDrivers(ownerId);
             currentDrivers = rows;
             callback(rows);
-        })
-        .catch((error) => {
-            console.error('[REALTIME] Initial driver fetch failed:', error);
-        });
+        } catch (error) {
+            console.error(`[REALTIME] ${scope === 'initial' ? 'Initial' : 'Driver reconciliation'} fetch failed:`, error);
+        }
+    };
+
+    reconcileDrivers('initial');
 
     const channel = supabase.channel(`public:drivers_new:all`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'drivers_new' }, async (payload: any) => {
             try {
                 if (payload?.eventType === 'INSERT' && payload?.new) {
-                    const fullRow = await fetchDriverRecord(String(payload.new.id || ''));
-                    const sourceRow = fullRow || payload.new;
-                    const creatorMap = await hydrateCreatorMap([sourceRow]);
-                    const inserted = mapDbToDriver(sourceRow, creatorMap);
-                    currentDrivers = [inserted, ...currentDrivers.filter((d) => d.id !== inserted.id)];
+                    const inserted = await buildRealtimeDriver(payload.new, currentDrivers);
+                    currentDrivers = upsertRealtimeDriver(currentDrivers, inserted, 'INSERT');
                     callback(currentDrivers);
                     onEvent?.('INSERT', inserted);
                 } else if (payload?.eventType === 'UPDATE' && payload?.new) {
-                    const fullRow = await fetchDriverRecord(String(payload.new.id || ''));
-                    const sourceRow = fullRow || payload.new;
-                    const creatorMap = await hydrateCreatorMap([sourceRow]);
-                    const updated = mapDbToDriver(sourceRow, creatorMap);
-                    currentDrivers = currentDrivers.map((d) => d.id === updated.id ? updated : d);
+                    const updated = await buildRealtimeDriver(payload.new, currentDrivers);
+                    currentDrivers = upsertRealtimeDriver(currentDrivers, updated, 'UPDATE');
                     callback(currentDrivers);
                     onEvent?.('UPDATE', updated);
                 } else if (payload?.eventType === 'DELETE' && payload?.old) {
@@ -406,15 +494,8 @@ export const subscribeToDrivers = (
                     onEvent?.('DELETE', deleted);
                 }
             } catch (error) {
-                console.warn('[REALTIME] Optimistic patch failed, will reconcile with fetch.', error);
-            }
-
-            try {
-                const refreshed = await fetchDrivers(ownerId);
-                currentDrivers = refreshed;
-                callback(refreshed);
-            } catch (error) {
-                console.error('[REALTIME] Driver reconciliation fetch failed:', error);
+                console.warn('[REALTIME] Event patch failed, reconciling from fetch.', error);
+                await reconcileDrivers('recovery');
             }
         })
         .subscribe();

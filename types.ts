@@ -64,6 +64,7 @@ export interface Driver {
   lastPFUpdate?: string | null;
   last3DayEmail?: string | null;
   last5DayEmail?: string | null;
+  updatedAt?: string | null;
 }
 
 export type SyncStatus = 'idle' | 'syncing' | 'success' | 'error';

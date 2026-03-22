@@ -208,12 +208,55 @@ const buildDriverResetUpdates = (): Partial<Driver> => ({
   hasPendingAlert: false
 });
 
+const parseDriverTimestamp = (value?: string | null): number => {
+  if (!value) return 0;
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const mergeDriverRecord = (currentDriver: Driver, incomingDriver: Driver): Driver => {
+  if (parseDriverTimestamp(incomingDriver.updatedAt) >= parseDriverTimestamp(currentDriver.updatedAt)) {
+    return { ...currentDriver, ...incomingDriver };
+  }
+  return currentDriver;
+};
+
 const mergeDriversById = (currentDrivers: Driver[], nextDrivers: Driver[]) => {
   const nextById = new Map(nextDrivers.map((driver) => [driver.id, driver]));
   return currentDrivers.map((driver) => {
     const persisted = nextById.get(driver.id);
-    return persisted ? { ...driver, ...persisted } : driver;
+    return persisted ? mergeDriverRecord(driver, persisted) : driver;
   });
+};
+
+const mergeDriverSnapshots = (
+  currentDrivers: Driver[],
+  nextDrivers: Driver[],
+  pendingMutations: Record<string, number>
+) => {
+  const currentById = new Map(currentDrivers.map((driver) => [driver.id, driver]));
+  const mergedSnapshot = nextDrivers.map((incomingDriver) => {
+    const currentDriver = currentById.get(incomingDriver.id);
+    currentById.delete(incomingDriver.id);
+
+    if (!currentDriver) {
+      return incomingDriver;
+    }
+
+    if (pendingMutations[incomingDriver.id]) {
+      return currentDriver;
+    }
+
+    return mergeDriverRecord(currentDriver, incomingDriver);
+  });
+
+  currentById.forEach((currentDriver, driverId) => {
+    if (pendingMutations[driverId]) {
+      mergedSnapshot.push(currentDriver);
+    }
+  });
+
+  return mergedSnapshot;
 };
 import {
   ArrowLeftRight,
@@ -278,6 +321,8 @@ const App: React.FC = () => {
   const [dbConnected, setDbConnected] = useState(false);
   const [companies, setCompanies] = useState<Company[]>([]);
   const hasUserInteractedRef = useRef(false);
+  const driverMutationSeqRef = useRef(0);
+  const pendingDriverMutationsRef = useRef<Record<string, number>>({});
   const activeUserId = authUser?.uid;
   const googleClientId = ((window as any).__GOOGLE_CLIENT_ID__ || '').trim();
   const isAdminUser = authUser?.role === 'admin' || authUser?.email === 'westa@algogroup.us';
@@ -319,9 +364,14 @@ const App: React.FC = () => {
     }) : prev);
   }, []);
 
-  const persistDriverUpdate = useCallback(async (id: string, updates: Partial<Driver>) => {
+  const applyDriverSnapshot = useCallback((snapshot: Driver[]) => {
+    setDrivers((prev) => mergeDriverSnapshots(prev, snapshot, pendingDriverMutationsRef.current));
+    setLastSync(new Date().toISOString());
+  }, []);
+
+  const persistDriverUpdate = useCallback(async (id: string, updates: Partial<Driver>, baseDriver?: Driver) => {
     if (!activeUserId) return;
-    const currentDriver = drivers.find((driver) => driver.id === id);
+    const currentDriver = baseDriver || drivers.find((driver) => driver.id === id);
     const payload = {
       ...updates,
       company: updates.company ?? currentDriver?.company,
@@ -565,8 +615,7 @@ const App: React.FC = () => {
       try {
         const refreshed = await fetchDrivers(driverScopeId);
         if (!isDisposed) {
-          setDrivers(refreshed);
-          setLastSync(new Date().toISOString());
+          applyDriverSnapshot(refreshed);
         }
       } catch (error) {
         console.warn('Driver reconciliation refresh failed:', error);
@@ -622,7 +671,9 @@ const App: React.FC = () => {
 
         setDbConnected(true);
         const refreshed = await fetchDrivers(driverScopeId);
-        setDrivers(refreshed);
+        if (!isDisposed) {
+          applyDriverSnapshot(refreshed);
+        }
         console.log('Database connected for user:', activeEmail);
       } catch (err) {
         console.error('Database initialization error:', err);
@@ -635,8 +686,7 @@ const App: React.FC = () => {
     const unsubDrivers = subscribeToDrivers(
       driverScopeId,
       (driversSnapshot) => {
-        setDrivers(driversSnapshot);
-        setLastSync(new Date().toISOString());
+        applyDriverSnapshot(driversSnapshot);
       },
       (eventType, changedDriver) => {
         if (!changedDriver) return;
@@ -710,7 +760,7 @@ const App: React.FC = () => {
       window.removeEventListener('focus', refreshOnFocus);
       document.removeEventListener('visibilitychange', refreshOnVisibility);
     };
-  }, [activeUserId, driverScopeId, authUser?.email, authUser?.name, allowedBoards.join('|'), isAdminUser, syncAuthMetadataFromCurrentUser, user?.accessToken, user?.email, user?.name]);
+  }, [activeUserId, driverScopeId, authUser?.email, authUser?.name, allowedBoards.join('|'), isAdminUser, syncAuthMetadataFromCurrentUser, user?.accessToken, user?.email, user?.name, applyDriverSnapshot]);
 
   useEffect(() => {
     if (!activeUserId) return;
@@ -938,7 +988,7 @@ const App: React.FC = () => {
     // Persist to Supabase
     const logOwnerId = driverOwnerUserId || activeUserId;
     if (activeUserId && logOwnerId) {
-      await persistDriverUpdate(driver.id, updatedDriver);
+      await persistDriverUpdate(driver.id, updatedDriver, updatedDriver);
       await addEmailLog(logOwnerId, logEntry);
     }
 
@@ -1005,7 +1055,7 @@ const App: React.FC = () => {
 
     const logOwnerId = driverOwnerUserId || activeUserId;
     if (activeUserId && logOwnerId) {
-      await persistDriverUpdate(driver.id, updatePayload);
+      await persistDriverUpdate(driver.id, updatePayload, updatedDriver);
       await addEmailLog(logOwnerId, logEntry);
     }
   };
@@ -1018,7 +1068,7 @@ const App: React.FC = () => {
     setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, ...updatePayload } : d));
 
     if (activeUserId && (driverOwnerUserId || activeUserId)) {
-      await persistDriverUpdate(driverId, updatePayload);
+      await persistDriverUpdate(driverId, updatePayload, driver);
     }
   };
 
@@ -1097,9 +1147,16 @@ const App: React.FC = () => {
   // This avoids immediate auto-send and keeps escalation visible in the table.
 
   const handleUpdateDriver = useCallback(async (id: string, updates: Partial<Driver>) => {
+    const mutationSeq = ++driverMutationSeqRef.current;
+    pendingDriverMutationsRef.current = {
+      ...pendingDriverMutationsRef.current,
+      [id]: mutationSeq
+    };
+
     let previousDriver: Driver | undefined;
     let updatedDriver: Driver | undefined;
     let persistencePayload: Partial<Driver> | undefined;
+    const optimisticUpdatedAt = new Date().toISOString();
 
     setDrivers(prev => {
       previousDriver = prev.find(d => d.id === id);
@@ -1108,7 +1165,7 @@ const App: React.FC = () => {
         const merged = { ...d, ...updates };
         const derived = deriveDriverAlertState(merged);
         persistencePayload = { ...updates, ...derived };
-        return { ...merged, ...derived };
+        return { ...merged, ...derived, updatedAt: optimisticUpdatedAt };
       });
       updatedDriver = newDrivers.find(d => d.id === id);
       return newDrivers;
@@ -1116,12 +1173,27 @@ const App: React.FC = () => {
 
     if (updatedDriver && activeUserId && persistencePayload) {
       try {
-        const persistedDriver = await persistDriverUpdate(id, persistencePayload);
-        if (persistedDriver) {
-          setDrivers(prev => prev.map(d => d.id === id ? { ...d, ...persistedDriver } : d));
+        const persistedDriver = await persistDriverUpdate(id, persistencePayload, updatedDriver);
+        const isLatestMutation = pendingDriverMutationsRef.current[id] === mutationSeq;
+
+        if (isLatestMutation) {
+          const nextPendingMutations = { ...pendingDriverMutationsRef.current };
+          delete nextPendingMutations[id];
+          pendingDriverMutationsRef.current = nextPendingMutations;
+        }
+
+        if (persistedDriver && isLatestMutation) {
+          setDrivers(prev => prev.map(d => d.id === id ? mergeDriverRecord(d, persistedDriver) : d));
         }
       } catch (error: any) {
-        if (previousDriver) {
+        const isLatestMutation = pendingDriverMutationsRef.current[id] === mutationSeq;
+        if (isLatestMutation) {
+          const nextPendingMutations = { ...pendingDriverMutationsRef.current };
+          delete nextPendingMutations[id];
+          pendingDriverMutationsRef.current = nextPendingMutations;
+        }
+
+        if (previousDriver && isLatestMutation) {
           setDrivers(prev => prev.map(d => d.id === id ? previousDriver! : d));
         }
         alert(error?.message || 'Failed to save driver update.');

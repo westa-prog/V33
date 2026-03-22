@@ -370,7 +370,8 @@ const serializeDriverRow = (
     lastPFUpdate: row.lastpfupdate || null,
     lastProfileReminderAt: row.lastprofilereminderat || null,
     last3DayEmail: row.last3dayemail || null,
-    last5DayEmail: row.last5dayemail || null
+    last5DayEmail: row.last5dayemail || null,
+    updatedAt: row.updated_at || null
 });
 
 const checkTableReachable = async (supabase: ReturnType<typeof getDb>, table: string) => {
