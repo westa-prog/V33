@@ -10,6 +10,7 @@ type AssignmentRecord = {
   id: string;
   email: string;
   name?: string;
+  role?: 'admin' | 'employee';
   assigned_boards?: string[];
   assigned_companies?: string[];
   status: 'pending' | 'active';
@@ -24,6 +25,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
   const apiUrl = (path: string) => apiBaseUrl ? `${apiBaseUrl}${path}` : path;
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
+  const [role, setRole] = useState<'employee' | 'admin'>('employee');
+  const [accessMode, setAccessMode] = useState<'assigned' | 'observer'>('assigned');
   const [selectedBoards, setSelectedBoards] = useState<string[]>([]);
   const [assignments, setAssignments] = useState<AssignmentRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -32,6 +35,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
   const [message, setMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
   const [boardDrafts, setBoardDrafts] = useState<Record<string, string[]>>({});
   const [nameDrafts, setNameDrafts] = useState<Record<string, string>>({});
+  const [roleDrafts, setRoleDrafts] = useState<Record<string, 'employee' | 'admin'>>({});
 
   const boardOptions = ['Board A', 'Board B', 'Board C'];
 
@@ -48,12 +52,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
 
       const nextBoards: Record<string, string[]> = {};
       const nextNames: Record<string, string> = {};
+      const nextRoles: Record<string, 'employee' | 'admin'> = {};
       for (const row of rows) {
         nextBoards[row.id] = row.assigned_boards || [];
         nextNames[row.id] = row.name || '';
+        nextRoles[row.id] = row.role === 'admin' ? 'admin' : 'employee';
       }
       setBoardDrafts(nextBoards);
       setNameDrafts(nextNames);
+      setRoleDrafts(nextRoles);
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || 'Failed to load assigned users.' });
     } finally {
@@ -86,6 +93,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
     setMessage(null);
 
     try {
+      const effectiveBoards = role === 'admin' || accessMode === 'observer' ? [] : selectedBoards;
       const endpoint = apiUrl('/api/admin/assign-user');
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -93,8 +101,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
         body: JSON.stringify({
           email,
           name,
+          role,
           admin_id: currentUser.uid,
-          assigned_boards: selectedBoards,
+          assigned_boards: effectiveBoards,
           assigned_companies: []
         })
       });
@@ -105,6 +114,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
       setMessage({ type: 'success', text: data?.message || 'User access assigned successfully.' });
       setEmail('');
       setName('');
+      setRole('employee');
+      setAccessMode('assigned');
       setSelectedBoards([]);
       await loadAssignments();
     } catch (err: any) {
@@ -120,6 +131,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
     setMessage(null);
 
     try {
+      const nextRole = roleDrafts[assignmentId] || 'employee';
+      const nextBoards = nextRole === 'admin' ? [] : (boardDrafts[assignmentId] || []);
       const endpoint = apiUrl(`/api/admin/assignments/${assignmentId}`);
       const res = await fetch(endpoint, {
         method: 'PATCH',
@@ -127,7 +140,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
         body: JSON.stringify({
           admin_id: currentUser.uid,
           name: nameDrafts[assignmentId] || '',
-          assigned_boards: boardDrafts[assignmentId] || [],
+          role: nextRole,
+          assigned_boards: nextBoards,
           assigned_companies: []
         })
       });
@@ -185,7 +199,33 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
             </div>
           </div>
 
-          <div className="space-y-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Role</label>
+              <select
+                className="w-full px-4 py-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
+                value={role}
+                onChange={(e) => setRole(e.target.value === 'admin' ? 'admin' : 'employee')}
+              >
+                <option value="employee">Employee</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Access Mode</label>
+              <select
+                className="w-full px-4 py-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
+                value={accessMode}
+                onChange={(e) => setAccessMode(e.target.value === 'observer' ? 'observer' : 'assigned')}
+                disabled={role === 'admin'}
+              >
+                <option value="assigned">Assigned Boards</option>
+                <option value="observer">All Boards Observer</option>
+              </select>
+            </div>
+          </div>
+
+          <div className={`space-y-2 ${role === 'admin' || accessMode === 'observer' ? 'opacity-60' : ''}`}>
             <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Assign Boards</label>
             <div className="grid grid-cols-3 gap-2">
               {boardOptions.map((board) => {
@@ -194,6 +234,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
                   <button
                     key={board}
                     type="button"
+                    disabled={role === 'admin' || accessMode === 'observer'}
                     onClick={() => toggleBoard(board)}
                     className={`px-3 py-2 rounded-lg text-sm font-semibold border transition-all ${
                       isSelected
@@ -206,7 +247,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
                 );
               })}
             </div>
-            <p className="text-xs text-slate-400">Leave all unselected to keep the user unrestricted until you tighten access later.</p>
+            <p className="text-xs text-slate-400">
+              {role === 'admin'
+                ? 'Admins always get full access.'
+                : accessMode === 'observer'
+                  ? 'Observer mode leaves boards empty so the employee can view all boards without board-limited write access.'
+                  : 'Select one or more boards for employee access.'}
+            </p>
           </div>
 
           <button
@@ -215,7 +262,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
             className="w-full flex items-center justify-center gap-2 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all disabled:opacity-50"
           >
             {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <UserPlus className="w-5 h-5" />}
-            {loading ? 'Saving Access...' : 'Assign Access'}
+            {loading ? 'Sending Invite...' : 'Assign Access And Invite'}
           </button>
         </form>
 
@@ -244,9 +291,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
                       <p className="font-semibold text-slate-900 dark:text-white">{assignment.name || assignment.email}</p>
                       <p className="text-xs text-slate-500">{assignment.email}</p>
                     </div>
-                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${assignment.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                      {assignment.status === 'active' ? 'Joined' : 'Pending'}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="px-3 py-1 rounded-full text-xs font-bold bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-100">
+                        {assignment.role === 'admin' ? 'Admin' : 'Employee'}
+                      </span>
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold ${assignment.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                        {assignment.status === 'active' ? 'Joined' : 'Invited'}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="mb-3">
@@ -261,6 +313,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
                   </div>
 
                   <div className="mb-3">
+                    <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">Role</label>
+                    <select
+                      value={roleDrafts[assignment.id] || 'employee'}
+                      onChange={(e) => setRoleDrafts((prev) => ({ ...prev, [assignment.id]: e.target.value === 'admin' ? 'admin' : 'employee' }))}
+                      className="mt-1 w-full px-3 py-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                    >
+                      <option value="employee">Employee</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                  </div>
+
+                  <div className={`mb-3 ${roleDrafts[assignment.id] === 'admin' ? 'opacity-60' : ''}`}>
                     <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-2">Assigned Boards</p>
                     <div className="grid grid-cols-3 gap-2">
                       {boardOptions.map((board) => {
@@ -269,6 +333,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
                           <button
                             key={`${assignment.id}-${board}`}
                             type="button"
+                            disabled={roleDrafts[assignment.id] === 'admin'}
                             onClick={() => toggleAssignmentBoard(assignment.id, board)}
                             className={`px-3 py-2 rounded-lg text-xs font-semibold border ${isSelected ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-700'}`}
                           >
@@ -277,6 +342,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
                         );
                       })}
                     </div>
+                    <p className="mt-2 text-xs text-slate-400">
+                      {roleDrafts[assignment.id] === 'admin'
+                        ? 'Admins ignore board restrictions.'
+                        : (boardDrafts[assignment.id] || []).length === 0
+                          ? 'No boards selected: this employee can observe all boards, but create flows stay restricted.'
+                          : 'Selected boards limit this employee to those boards.'}
+                    </p>
                   </div>
 
                   <div className="mb-3 text-xs text-slate-500">

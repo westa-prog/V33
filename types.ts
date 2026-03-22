@@ -96,7 +96,7 @@ export interface AuthUser {
   assignedBoard?: string;
   assignedBoards?: string[];
   uid?: string;
-  role?: string;
+  role?: 'admin' | 'employee' | 'user';
   adminId?: string;
   assignedCompanies?: string[];
   landingHtml?: string;

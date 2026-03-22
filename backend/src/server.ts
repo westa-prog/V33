@@ -99,6 +99,10 @@ const readUserMetadata = (user: any) => {
     };
 };
 const normalizeEmail = (value: unknown) => String(value || '').trim().toLowerCase();
+const normalizeRole = (value: unknown): 'admin' | 'employee' => {
+    const role = String(value || '').trim().toLowerCase();
+    return role === 'admin' ? 'admin' : 'employee';
+};
 const isProfileSchemaMismatch = (message: string) => {
     return /assigned_boards|assigned_board|assigned_companies|admin_id|board_id|company_id/i.test(message || '');
 };
@@ -216,6 +220,7 @@ const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 const ALLOWED_BOARDS = new Set(['Board A', 'Board B', 'Board C']);
 const ADMIN_EMAIL = 'westa@algogroup.us';
+const APP_URL = String(process.env.APP_URL || process.env.FRONTEND_URL || '').trim().replace(/\/+$/, '');
 
 const cleanupUploads = (files: Express.Multer.File[] = []) => {
     for (const file of files) {
@@ -340,10 +345,11 @@ app.post('/api/auth/ensure-profile', async (req, res) => {
         }
 
         if (assignment) {
+            const assignmentRole = normalizeRole(assignment.role);
             await syncUserAccess(supabase, userData.user, {
-                role: 'employee',
-                admin_id: assignment.admin_id,
-                assigned_boards: normalizeList(assignment.assigned_boards).map(normalizeBoardName).filter(Boolean),
+                role: assignmentRole,
+                admin_id: assignmentRole === 'admin' ? null : assignment.admin_id,
+                assigned_boards: assignmentRole === 'admin' ? [] : normalizeList(assignment.assigned_boards).map(normalizeBoardName).filter(Boolean),
                 assigned_companies: normalizeList(assignment.assigned_companies)
             });
 
@@ -359,9 +365,9 @@ app.post('/api/auth/ensure-profile', async (req, res) => {
 
             res.json({
                 success: true,
-                role: 'employee',
-                admin_id: assignment.admin_id,
-                assigned_boards: normalizeList(assignment.assigned_boards).map(normalizeBoardName).filter(Boolean)
+                role: assignmentRole,
+                admin_id: assignmentRole === 'admin' ? null : assignment.admin_id,
+                assigned_boards: assignmentRole === 'admin' ? [] : normalizeList(assignment.assigned_boards).map(normalizeBoardName).filter(Boolean)
             });
             return;
         }
@@ -396,11 +402,14 @@ app.post('/api/auth/ensure-profile', async (req, res) => {
 
 app.post('/api/admin/assign-user', async (req, res) => {
     try {
-        const { email, name, admin_id, assigned_boards, assigned_companies } = req.body || {};
+        const { email, name, role, admin_id, assigned_boards, assigned_companies } = req.body || {};
         const normalizedEmail = normalizeEmail(email);
         const normalizedName = String(name || '').trim();
+        const normalizedRole = normalizeRole(role);
         const normalizedAdminId = String(admin_id || '').trim();
-        const normalizedBoards = normalizeList(assigned_boards).map(normalizeBoardName).filter(Boolean);
+        const normalizedBoards = normalizeRole(role) === 'admin'
+            ? []
+            : normalizeList(assigned_boards).map(normalizeBoardName).filter(Boolean);
         const normalizedCompanies = normalizeList(assigned_companies);
 
         if (!isValidEmail(normalizedEmail)) {
@@ -418,7 +427,8 @@ app.post('/api/admin/assign-user', async (req, res) => {
 
         const supabase = getDb();
         const authUser = await findAuthUserByEmail(supabase, normalizedEmail);
-        const status = authUser ? 'active' : 'pending';
+        const claimedUserId = authUser?.last_sign_in_at ? authUser.id : null;
+        const status = claimedUserId ? 'active' : 'pending';
 
         const { data: assignment, error: assignmentError } = await supabase
             .from('employee_assignments')
@@ -426,12 +436,12 @@ app.post('/api/admin/assign-user', async (req, res) => {
                 email: normalizedEmail,
                 name: normalizedName || null,
                 admin_id: normalizedAdminId,
-                role: 'employee',
+                role: normalizedRole,
                 assigned_boards: normalizedBoards,
                 assigned_companies: normalizedCompanies,
                 status,
-                claimed_user_id: authUser?.id || null,
-                joined_at: authUser ? new Date().toISOString() : null
+                claimed_user_id: claimedUserId,
+                joined_at: claimedUserId ? new Date().toISOString() : null
             }, { onConflict: 'email' })
             .select('*')
             .single();
@@ -444,20 +454,41 @@ app.post('/api/admin/assign-user', async (req, res) => {
         if (authUser) {
             await syncUserAccess(supabase, authUser, {
                 name: normalizedName || undefined,
-                role: 'employee',
-                admin_id: normalizedAdminId,
+                role: normalizedRole,
+                admin_id: normalizedRole === 'admin' ? null : normalizedAdminId,
                 assigned_boards: normalizedBoards,
                 assigned_companies: normalizedCompanies
             });
+        } else {
+            const inviteOptions: {
+                data: Record<string, unknown>;
+                redirectTo?: string;
+            } = {
+                data: {
+                    full_name: normalizedName || normalizedEmail.split('@')[0],
+                    role: normalizedRole,
+                    admin_id: normalizedRole === 'admin' ? null : normalizedAdminId,
+                    assigned_boards: normalizedBoards,
+                    assigned_companies: normalizedCompanies
+                }
+            };
+            if (APP_URL) {
+                inviteOptions.redirectTo = APP_URL;
+            }
+            const { error: inviteError } = await supabase.auth.admin.inviteUserByEmail(normalizedEmail, inviteOptions);
+            if (inviteError) {
+                res.status(500).json({ error: inviteError.message || 'Failed to send invite email.' });
+                return;
+            }
         }
 
         res.json({
             success: true,
             assignment,
-            joined: Boolean(authUser),
+            joined: Boolean(claimedUserId),
             message: authUser
-                ? `${normalizedEmail} already has an account. Access was updated immediately.`
-                : `${normalizedEmail} is assigned. Access will activate after the user signs in.`
+                ? `${normalizedEmail} already exists in auth. Access was updated${claimedUserId ? ' immediately' : ', and the invite remains pending until first sign-in'}.`
+                : `${normalizedEmail} was assigned and a Supabase invite email was sent.`
         });
     } catch (e: any) {
         console.error('[API] Admin assign-user failed:', e);
@@ -512,7 +543,7 @@ app.get('/api/admin/assignments', async (req, res) => {
                 id: row.id,
                 email: row.email,
                 name: joinedUserName || row.email,
-                role: row.role,
+                role: normalizeRole(row.role),
                 assigned_boards: normalizeList(row.assigned_boards).map(normalizeBoardName).filter(Boolean),
                 assigned_companies: normalizeList(row.assigned_companies),
                 status: row.status,
@@ -540,10 +571,13 @@ app.get('/api/admin/assignments', async (req, res) => {
 app.patch('/api/admin/assignments/:assignmentId', async (req, res) => {
     try {
         const assignmentId = String(req.params.assignmentId || '').trim();
-        const { admin_id, name, assigned_boards, assigned_companies, landing_html, email_template, email_templates } = req.body || {};
+        const { admin_id, name, role, assigned_boards, assigned_companies, landing_html, email_template, email_templates } = req.body || {};
         const normalizedAdminId = String(admin_id || '').trim();
         const normalizedName = String(name || '').trim();
-        const normalizedBoards = normalizeList(assigned_boards).map(normalizeBoardName).filter(Boolean);
+        const normalizedRole = normalizeRole(role);
+        const normalizedBoards = normalizedRole === 'admin'
+            ? []
+            : normalizeList(assigned_boards).map(normalizeBoardName).filter(Boolean);
         const normalizedCompanies = normalizeList(assigned_companies);
 
         if (!isUuid(assignmentId) || !isUuid(normalizedAdminId)) {
@@ -576,6 +610,7 @@ app.patch('/api/admin/assignments/:assignmentId', async (req, res) => {
             .from('employee_assignments')
             .update({
                 name: normalizedName || existing.name || null,
+                role: normalizedRole,
                 assigned_boards: normalizedBoards,
                 assigned_companies: normalizedCompanies
             })
@@ -597,8 +632,8 @@ app.patch('/api/admin/assignments/:assignmentId', async (req, res) => {
 
             await syncUserAccess(supabase, userData.user, {
                 name: normalizedName || existing.name || undefined,
-                role: 'employee',
-                admin_id: normalizedAdminId,
+                role: normalizedRole,
+                admin_id: normalizedRole === 'admin' ? null : normalizedAdminId,
                 assigned_boards: normalizedBoards,
                 assigned_companies: normalizedCompanies,
                 landing_html: typeof landing_html === 'string' ? landing_html : undefined,
