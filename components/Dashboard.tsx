@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Driver, ELDStatus } from '../types';
+import { Driver, ELDStatus, RealtimeChannelHealth } from '../types';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { Mail, RefreshCw, Server } from 'lucide-react';
 import axios from 'axios';
@@ -10,9 +10,10 @@ interface DashboardProps {
     drivers: Driver[];
     assignedBoard?: string;
     employeeName?: string;
+    realtimeHealth?: Record<string, RealtimeChannelHealth>;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, employeeName }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, employeeName, realtimeHealth }) => {
     const rawApiBaseUrl = ((import.meta as any).env.VITE_API_URL || '').trim();
     const apiBaseUrl = rawApiBaseUrl.replace(/\/+$/, '');
     const isBrowser = typeof window !== 'undefined';
@@ -32,6 +33,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, em
         uploadsEnabled: boolean;
         checks?: Record<string, boolean>;
         warnings?: string[];
+        realtime?: {
+            diagnosticsReady?: boolean;
+            tables?: Record<string, boolean>;
+        };
     } | null>(null);
     const [statusLoading, setStatusLoading] = useState(false);
 
@@ -110,6 +115,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, em
         return warnings;
     }, [effectiveApiBaseUrl, isLocalHost]);
     const allWarnings = [...frontendWarnings, ...(backendStatus?.warnings || [])];
+    const realtimeTableEntries = Object.entries(backendStatus?.realtime?.tables || {}) as [string, boolean][];
+    const realtimeChannelEntries = Object.entries(realtimeHealth || {}) as [string, RealtimeChannelHealth][];
+    const formatHealthTime = (value?: string) => value ? new Date(value).toLocaleTimeString() : 'Never';
+    const normalizeRealtimeStatus = (status?: string) => {
+        if (!status) return 'IDLE';
+        return status.replace(/_/g, ' ');
+    };
 
     return (
         <div className="space-y-6 animate-in fade-in zoom-in-95 duration-200">
@@ -324,6 +336,72 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, em
                             </div>
                         </div>
                     )}
+
+                    <div className="mt-6 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 p-5">
+                        <div className="flex items-start justify-between gap-4">
+                            <div>
+                                <h4 className="text-lg font-bold text-slate-900 dark:text-white">Realtime Health</h4>
+                                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                                    Publication checks come from the backend. Channel status comes from the live browser session.
+                                </p>
+                            </div>
+                            <div className={`px-3 py-2 rounded-xl text-xs font-black tracking-wider border ${
+                                backendStatus?.realtime?.diagnosticsReady
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:border-emerald-900/60'
+                                    : 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:border-amber-900/60'
+                            }`}>
+                                {backendStatus?.realtime?.diagnosticsReady ? 'DIAGNOSTICS READY' : 'DIAGNOSTICS MISSING'}
+                            </div>
+                        </div>
+
+                        {realtimeTableEntries.length > 0 && (
+                            <div className="mt-5">
+                                <h5 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-3">Publication Tables</h5>
+                                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                                    {realtimeTableEntries.map(([tableName, enabled]) => (
+                                        <div key={tableName} className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
+                                            <div className="text-sm font-bold text-slate-900 dark:text-white">{tableName}</div>
+                                            <div className={`mt-2 text-xs font-black tracking-wider ${
+                                                enabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'
+                                            }`}>
+                                                {enabled ? 'ENABLED' : 'DISABLED'}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {realtimeChannelEntries.length > 0 && (
+                            <div className="mt-5">
+                                <h5 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-3">Browser Channels</h5>
+                                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+                                    {realtimeChannelEntries.map(([channelName, health]) => (
+                                        <div key={channelName} className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
+                                            <div className="text-sm font-bold text-slate-900 dark:text-white">{channelName}</div>
+                                            <div className={`mt-2 text-xs font-black tracking-wider ${
+                                                health.status === 'SUBSCRIBED'
+                                                    ? 'text-emerald-600 dark:text-emerald-400'
+                                                    : health.status === 'CHANNEL_ERROR' || health.status === 'TIMED_OUT'
+                                                        ? 'text-red-600 dark:text-red-400'
+                                                    : health.status === 'JOINING' || health.status === 'CLOSED'
+                                                        ? 'text-amber-600 dark:text-amber-400'
+                                                        : 'text-slate-500 dark:text-slate-400'
+                                            }`}>
+                                                {normalizeRealtimeStatus(health.status)}
+                                            </div>
+                                            <div className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                                                Last status: {formatHealthTime(health.lastStatusAt)}
+                                            </div>
+                                            <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                                                Last event: {formatHealthTime(health.lastEventAt)}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
         </div>

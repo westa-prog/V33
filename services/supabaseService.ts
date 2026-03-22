@@ -14,12 +14,18 @@ export interface UserProfile {
 }
 
 type DriverRealtimeEvent = 'INSERT' | 'UPDATE' | 'DELETE';
+type RealtimeStatusCallback = (status: string) => void;
 
 const throwIfSupabaseError = (scope: string, error: any) => {
     if (!error) return;
     const message = error?.message || String(error);
     console.error(`[SUPABASE] ${scope} failed:`, error);
     throw new Error(message);
+};
+
+const emitRealtimeStatus = (channelName: string, status: string, onStatusChange?: RealtimeStatusCallback) => {
+    console.info(`[REALTIME] ${channelName} status: ${status}`);
+    onStatusChange?.(status);
 };
 
 const boardLabelToId = (board?: string | null): string | null => {
@@ -124,13 +130,17 @@ export const fetchUserProfile = async (userId: string): Promise<UserProfile | nu
     };
 };
 
-export const subscribeToUserProfile = (userId: string, callback: (profile: UserProfile | null) => void) => {
+export const subscribeToUserProfile = (
+    userId: string,
+    callback: (profile: UserProfile | null) => void,
+    onStatusChange?: RealtimeStatusCallback
+) => {
     fetchUserProfile(userId).then(callback);
     const channel = supabase.channel(`public:profiles:id=eq.${userId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${userId}` }, async () => {
             callback(await fetchUserProfile(userId));
         })
-        .subscribe();
+        .subscribe((status) => emitRealtimeStatus(`profiles:${userId}`, status, onStatusChange));
     return () => supabase.removeChannel(channel);
 };
 
@@ -376,7 +386,11 @@ export const fetchCompanies = async (boardId?: string): Promise<Company[]> => {
     }));
 };
 
-export const subscribeToCompanies = (callback: (companies: Company[]) => void, boardId?: string) => {
+export const subscribeToCompanies = (
+    callback: (companies: Company[]) => void,
+    boardId?: string,
+    onStatusChange?: RealtimeStatusCallback
+) => {
     fetchCompanies(boardId).then(callback);
     const channel = supabase.channel(`public:companies${boardId ? `:board_id=eq.${boardId}` : ''}`)
         .on('postgres_changes', {
@@ -388,7 +402,7 @@ export const subscribeToCompanies = (callback: (companies: Company[]) => void, b
             const refreshed = await fetchCompanies(boardId);
             callback(refreshed);
         })
-        .subscribe();
+        .subscribe((status) => emitRealtimeStatus(`companies${boardId ? `:${boardId}` : ''}`, status, onStatusChange));
     return () => supabase.removeChannel(channel);
 };
 
@@ -457,7 +471,8 @@ export const addDriverReply = async (userId: string, reply: DriverReply) => {
 export const subscribeToDrivers = (
     ownerId: string,
     callback: (drivers: Driver[]) => void,
-    onEvent?: (eventType: DriverRealtimeEvent, driver?: Driver) => void
+    onEvent?: (eventType: DriverRealtimeEvent, driver?: Driver) => void,
+    onStatusChange?: RealtimeStatusCallback
 ) => {
     let currentDrivers: Driver[] = [];
 
@@ -498,29 +513,37 @@ export const subscribeToDrivers = (
                 await reconcileDrivers('recovery');
             }
         })
-        .subscribe();
+        .subscribe((status) => emitRealtimeStatus('drivers_new', status, onStatusChange));
 
     return () => {
         supabase.removeChannel(channel);
     };
 };
 
-export const subscribeToEmailLogs = (userId: string, callback: (logs: EmailLogEntry[]) => void) => {
+export const subscribeToEmailLogs = (
+    userId: string,
+    callback: (logs: EmailLogEntry[]) => void,
+    onStatusChange?: RealtimeStatusCallback
+) => {
     fetchEmailLogs(userId).then(callback);
     const channel = supabase.channel(`public:email_logs:user_id=eq.${userId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'email_logs', filter: `user_id=eq.${userId}` }, async () => {
             callback(await fetchEmailLogs(userId));
         })
-        .subscribe();
+        .subscribe((status) => emitRealtimeStatus(`email_logs:${userId}`, status, onStatusChange));
     return () => supabase.removeChannel(channel);
 };
 
-export const subscribeToDriverReplies = (userId: string, callback: (replies: DriverReply[]) => void) => {
+export const subscribeToDriverReplies = (
+    userId: string,
+    callback: (replies: DriverReply[]) => void,
+    onStatusChange?: RealtimeStatusCallback
+) => {
     fetchDriverReplies(userId).then(callback);
     const channel = supabase.channel(`public:driver_replies:user_id=eq.${userId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'driver_replies', filter: `user_id=eq.${userId}` }, async () => {
             callback(await fetchDriverReplies(userId));
         })
-        .subscribe();
+        .subscribe((status) => emitRealtimeStatus(`driver_replies:${userId}`, status, onStatusChange));
     return () => supabase.removeChannel(channel);
 };

@@ -19,6 +19,10 @@ Run migrations in order:
 4. `supabase/migrations/0004_normalized_board_company_model.sql`
 5. `supabase/migrations/0005_drivers_new_compat_columns.sql`
 6. `supabase/migrations/0006_board_id_schema_safety.sql`
+7. `supabase/migrations/0007_employee_assignments.sql`
+8. `supabase/migrations/0008_employee_tenant_rls_fix.sql`
+9. `supabase/migrations/0009_enable_realtime_publications.sql`
+10. `supabase/migrations/0010_realtime_publication_health_rpc.sql`
 
 Verify tables exist:
 
@@ -156,6 +160,7 @@ To get instant admin/user updates without refresh:
 2. Ensure realtime replication is enabled for:
    - `public.boards`
    - `public.driver_replies`
+   - `public.companies`
    - `public.drivers`
    - `public.drivers_new`
    - `public.email_logs`

@@ -67,6 +67,12 @@ export interface Driver {
   updatedAt?: string | null;
 }
 
+export interface RealtimeChannelHealth {
+  status: string;
+  lastStatusAt?: string;
+  lastEventAt?: string;
+}
+
 export type SyncStatus = 'idle' | 'syncing' | 'success' | 'error';
 
 export interface GoogleUser {

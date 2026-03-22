@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Driver, DutyStatus, ELDStatus, FollowUpStatus, EmailLogEntry, GoogleUser, AuthUser, DriverReply, EmailTemplateMap, Company } from './types';
+import { Driver, DutyStatus, ELDStatus, FollowUpStatus, EmailLogEntry, GoogleUser, AuthUser, DriverReply, EmailTemplateMap, Company, RealtimeChannelHealth } from './types';
 import { INITIAL_DRIVERS } from './constants';
 import { DriverTable } from './components/DriverTable';
 import { StatsCard } from './components/StatsCard';
@@ -37,6 +37,14 @@ const STORAGE_KEYS = {
   driverReplies: 'app_driver_replies',
   liveMode: 'app_live_mode'
 };
+
+const createInitialRealtimeHealth = (): Record<string, RealtimeChannelHealth> => ({
+  drivers: { status: 'IDLE' },
+  companies: { status: 'IDLE' },
+  emailLogs: { status: 'IDLE' },
+  driverReplies: { status: 'IDLE' },
+  profile: { status: 'IDLE' }
+});
 
 const readJsonStorage = <T,>(key: string, fallback: T): T => {
   try {
@@ -335,6 +343,7 @@ const App: React.FC = () => {
   const [lastSync, setLastSync] = useState<string | undefined>();
   const [dbConnected, setDbConnected] = useState(false);
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [realtimeHealth, setRealtimeHealth] = useState<Record<string, RealtimeChannelHealth>>(() => createInitialRealtimeHealth());
   const hasUserInteractedRef = useRef(false);
   const driverMutationSeqRef = useRef(0);
   const pendingDriverMutationsRef = useRef<Record<string, number>>({});
@@ -384,6 +393,29 @@ const App: React.FC = () => {
     const hasPendingMutations = Object.keys(pendingMutations).length > 0;
     setDrivers((prev) => hasPendingMutations ? mergeDriverSnapshots(prev, snapshot, pendingMutations) : snapshot);
     setLastSync(new Date().toISOString());
+  }, []);
+
+  const updateRealtimeChannelStatus = useCallback((channelKey: string, status: string) => {
+    const timestamp = new Date().toISOString();
+    setRealtimeHealth((prev) => ({
+      ...prev,
+      [channelKey]: {
+        ...(prev[channelKey] || { status: 'IDLE' }),
+        status,
+        lastStatusAt: timestamp
+      }
+    }));
+  }, []);
+
+  const markRealtimeChannelEvent = useCallback((channelKey: string) => {
+    const timestamp = new Date().toISOString();
+    setRealtimeHealth((prev) => ({
+      ...prev,
+      [channelKey]: {
+        ...(prev[channelKey] || { status: 'IDLE' }),
+        lastEventAt: timestamp
+      }
+    }));
   }, []);
 
   const persistDriverUpdate = useCallback(async (id: string, updates: Partial<Driver>, baseDriver?: Driver) => {
@@ -620,6 +652,7 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!activeUserId) {
       setDbConnected(false);
+      setRealtimeHealth(createInitialRealtimeHealth());
       return;
     }
 
@@ -700,12 +733,19 @@ const App: React.FC = () => {
 
     setupDatabase();
 
+    updateRealtimeChannelStatus('drivers', 'JOINING');
+    updateRealtimeChannelStatus('companies', 'JOINING');
+    updateRealtimeChannelStatus('emailLogs', 'JOINING');
+    updateRealtimeChannelStatus('driverReplies', 'JOINING');
+
     const unsubDrivers = subscribeToDrivers(
       driverScopeId,
       (driversSnapshot) => {
+        markRealtimeChannelEvent('drivers');
         applyDriverSnapshot(driversSnapshot);
       },
       (eventType, changedDriver) => {
+        markRealtimeChannelEvent('drivers');
         if (!changedDriver) return;
         const creator = changedDriver.createdByName || changedDriver.createdByEmail || 'Unknown user';
         if (eventType === 'INSERT') {
@@ -731,20 +771,24 @@ const App: React.FC = () => {
             console.warn('Notification sound blocked:', err);
           }
         }
-      }
+      },
+      (status) => updateRealtimeChannelStatus('drivers', status)
     );
 
     const unsubCompanies = subscribeToCompanies((companySnapshot) => {
+      markRealtimeChannelEvent('companies');
       setCompanies(companySnapshot);
-    }, isAdminUser ? undefined : ownBoardId);
+    }, isAdminUser ? undefined : ownBoardId, (status) => updateRealtimeChannelStatus('companies', status));
 
     const unsubLogs = subscribeToEmailLogs(driverScopeId, (emailLogSnapshot) => {
+      markRealtimeChannelEvent('emailLogs');
       setEmailLogs(emailLogSnapshot);
-    });
+    }, (status) => updateRealtimeChannelStatus('emailLogs', status));
 
     const unsubReplies = subscribeToDriverReplies(driverScopeId, (driverReplySnapshot) => {
+      markRealtimeChannelEvent('driverReplies');
       setDriverReplies(driverReplySnapshot);
-    });
+    }, (status) => updateRealtimeChannelStatus('driverReplies', status));
 
     const refreshOnVisibility = () => {
       if (document.visibilityState === 'visible') {
@@ -777,12 +821,14 @@ const App: React.FC = () => {
       window.removeEventListener('focus', refreshOnFocus);
       document.removeEventListener('visibilitychange', refreshOnVisibility);
     };
-  }, [activeUserId, driverScopeId, authUser?.email, authUser?.name, allowedBoards.join('|'), isAdminUser, syncAuthMetadataFromCurrentUser, user?.accessToken, user?.email, user?.name, applyDriverSnapshot]);
+  }, [activeUserId, driverScopeId, authUser?.email, authUser?.name, allowedBoards.join('|'), isAdminUser, syncAuthMetadataFromCurrentUser, user?.accessToken, user?.email, user?.name, applyDriverSnapshot, updateRealtimeChannelStatus, markRealtimeChannelEvent]);
 
   useEffect(() => {
     if (!activeUserId) return;
+    updateRealtimeChannelStatus('profile', 'JOINING');
     const unsubProfile = subscribeToUserProfile(activeUserId, (profile) => {
       if (!profile) return;
+      markRealtimeChannelEvent('profile');
       const profileBoards = normalizeBoardList(profile.assigned_boards ?? []);
       setAuthUser(prev => prev ? {
         ...prev,
@@ -797,11 +843,11 @@ const App: React.FC = () => {
       syncAuthMetadataFromCurrentUser().catch((error) => {
         console.warn('Failed to refresh auth metadata after profile update:', error);
       });
-    });
+    }, (status) => updateRealtimeChannelStatus('profile', status));
     return () => {
       unsubProfile();
     };
-  }, [activeUserId, syncAuthMetadataFromCurrentUser]);
+  }, [activeUserId, syncAuthMetadataFromCurrentUser, updateRealtimeChannelStatus, markRealtimeChannelEvent]);
 
   useEffect(() => {
     if (isAdminUser) {
@@ -1461,7 +1507,7 @@ const App: React.FC = () => {
           )}
         </header>
 
-        {activeTab === 'Dashboard' && <Dashboard drivers={accessibleDrivers} assignedBoard={fixedEmployeeBoard} employeeName={isAdminUser ? undefined : authUser?.name} />}
+        {activeTab === 'Dashboard' && <Dashboard drivers={accessibleDrivers} assignedBoard={fixedEmployeeBoard} employeeName={isAdminUser ? undefined : authUser?.name} realtimeHealth={realtimeHealth} />}
 
         {activeTab === 'Connection' && (
           <div className="space-y-8">

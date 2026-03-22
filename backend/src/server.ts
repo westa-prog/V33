@@ -428,12 +428,47 @@ const serializeDriverRow = (
     updatedAt: row.updated_at || null
 });
 
+const REQUIRED_REALTIME_TABLES = [
+    'boards',
+    'companies',
+    'driver_replies',
+    'drivers',
+    'drivers_new',
+    'email_logs',
+    'employee_assignments',
+    'profiles'
+] as const;
+
 const checkTableReachable = async (supabase: ReturnType<typeof getDb>, table: string) => {
     const { error } = await supabase.from(table).select('*', { head: true, count: 'exact' }).limit(1);
     if (error) {
         return { ok: false, error: error.message || `Failed to query ${table}` };
     }
     return { ok: true };
+};
+
+const checkRealtimePublications = async (supabase: ReturnType<typeof getDb>) => {
+    const { data, error } = await supabase.rpc('get_realtime_publication_status');
+    if (error) {
+        return {
+            ok: false,
+            error: error.message || 'Failed to load Realtime publication status.',
+            tables: Object.fromEntries(REQUIRED_REALTIME_TABLES.map((tableName) => [tableName, false]))
+        };
+    }
+
+    const rows = Array.isArray(data) ? data : [];
+    const tables = Object.fromEntries(REQUIRED_REALTIME_TABLES.map((tableName) => [tableName, false])) as Record<string, boolean>;
+    for (const row of rows) {
+        const tableName = String((row as any)?.table_name || '').trim();
+        if (!tableName || !(tableName in tables)) continue;
+        tables[tableName] = Boolean((row as any)?.enabled);
+    }
+
+    return {
+        ok: true,
+        tables
+    };
 };
 
 app.get('/api/status', async (req, res) => {
@@ -457,7 +492,20 @@ app.get('/api/status', async (req, res) => {
         emailLogsTableReady: false,
         driverRepliesTableReady: false,
         employeeAssignmentsTableReady: false,
-        liveEmailConfigured: emailStatus.liveEmailConfigured
+        liveEmailConfigured: emailStatus.liveEmailConfigured,
+        realtimeDiagnosticsReady: false,
+        realtimeBoardsEnabled: false,
+        realtimeCompaniesEnabled: false,
+        realtimeDriverRepliesEnabled: false,
+        realtimeDriversEnabled: false,
+        realtimeDriversNewEnabled: false,
+        realtimeEmailLogsEnabled: false,
+        realtimeEmployeeAssignmentsEnabled: false,
+        realtimeProfilesEnabled: false
+    };
+    let realtimeStatus = {
+        diagnosticsReady: false,
+        tables: Object.fromEntries(REQUIRED_REALTIME_TABLES.map((tableName) => [tableName, false])) as Record<string, boolean>
     };
 
     if (supabaseConfig.supabaseUrlConfigured) {
@@ -469,14 +517,16 @@ app.get('/api/status', async (req, res) => {
                 driversCheck,
                 emailLogsCheck,
                 driverRepliesCheck,
-                assignmentsCheck
+                assignmentsCheck,
+                realtimeCheck
             ] = await Promise.all([
                 checkTableReachable(supabase, 'profiles'),
                 checkTableReachable(supabase, 'companies'),
                 checkTableReachable(supabase, 'drivers_new'),
                 checkTableReachable(supabase, 'email_logs'),
                 checkTableReachable(supabase, 'driver_replies'),
-                checkTableReachable(supabase, 'employee_assignments')
+                checkTableReachable(supabase, 'employee_assignments'),
+                checkRealtimePublications(supabase)
             ]);
 
             checks.profilesTableReady = profilesCheck.ok;
@@ -486,9 +536,33 @@ app.get('/api/status', async (req, res) => {
             checks.driverRepliesTableReady = driverRepliesCheck.ok;
             checks.employeeAssignmentsTableReady = assignmentsCheck.ok;
             checks.databaseReachable = profilesCheck.ok || companiesCheck.ok || driversCheck.ok;
+            checks.realtimeDiagnosticsReady = realtimeCheck.ok;
+            checks.realtimeBoardsEnabled = Boolean(realtimeCheck.tables.boards);
+            checks.realtimeCompaniesEnabled = Boolean(realtimeCheck.tables.companies);
+            checks.realtimeDriverRepliesEnabled = Boolean(realtimeCheck.tables.driver_replies);
+            checks.realtimeDriversEnabled = Boolean(realtimeCheck.tables.drivers);
+            checks.realtimeDriversNewEnabled = Boolean(realtimeCheck.tables.drivers_new);
+            checks.realtimeEmailLogsEnabled = Boolean(realtimeCheck.tables.email_logs);
+            checks.realtimeEmployeeAssignmentsEnabled = Boolean(realtimeCheck.tables.employee_assignments);
+            checks.realtimeProfilesEnabled = Boolean(realtimeCheck.tables.profiles);
+            realtimeStatus = {
+                diagnosticsReady: realtimeCheck.ok,
+                tables: realtimeCheck.tables
+            };
 
             for (const result of [profilesCheck, companiesCheck, driversCheck, emailLogsCheck, driverRepliesCheck, assignmentsCheck]) {
                 if (!result.ok && result.error) warnings.push(result.error);
+            }
+            if (!realtimeCheck.ok && realtimeCheck.error) {
+                warnings.push(`${realtimeCheck.error} Run supabase/migrations/0010_realtime_publication_health_rpc.sql.`);
+            }
+            if (realtimeCheck.ok) {
+                const missingRealtimeTables = Object.entries(realtimeCheck.tables)
+                    .filter(([_, enabled]) => !enabled)
+                    .map(([tableName]) => tableName);
+                if (missingRealtimeTables.length > 0) {
+                    warnings.push(`Supabase Realtime is not enabled for: ${missingRealtimeTables.join(', ')}. Run supabase/migrations/0009_enable_realtime_publications.sql.`);
+                }
             }
         } catch (error: any) {
             warnings.push(error?.message || 'Supabase connectivity check failed.');
@@ -505,12 +579,22 @@ app.get('/api/status', async (req, res) => {
         checks.emailLogsTableReady &&
         checks.driverRepliesTableReady &&
         checks.employeeAssignmentsTableReady &&
+        checks.realtimeDiagnosticsReady &&
+        checks.realtimeBoardsEnabled &&
+        checks.realtimeCompaniesEnabled &&
+        checks.realtimeDriverRepliesEnabled &&
+        checks.realtimeDriversEnabled &&
+        checks.realtimeDriversNewEnabled &&
+        checks.realtimeEmailLogsEnabled &&
+        checks.realtimeEmployeeAssignmentsEnabled &&
+        checks.realtimeProfilesEnabled &&
         checks.liveEmailConfigured;
 
     res.json({
         status: 'online',
         releaseReady,
         checks,
+        realtime: realtimeStatus,
         emailConfigured: emailStatus.liveEmailConfigured,
         emailMode: emailStatus.mode,
         smtpConfigured: emailStatus.smtpConfigured,
