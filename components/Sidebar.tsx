@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   LayoutDashboard, 
   Wifi, 
@@ -8,9 +8,14 @@ import {
   Mail,
   UserPlus,
   Settings,
-  LogOut
+  LogOut,
+  ChevronDown,
+  ChevronRight,
+  User,
+  PlugZap
 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { DatabaseSyncControl } from './DatabaseSyncControl';
 
 export const menuItems = [
   { icon: LayoutDashboard, label: "Dashboard", id: 'Dashboard', color: "text-blue-500" },
@@ -29,9 +34,36 @@ interface SidebarProps {
   setActiveTab: (tab: string) => void;
   isAdmin: boolean;
   onLogout: () => void;
+  googleConnected: boolean;
+  googleClientIdPresent: boolean;
+  onGoogleConnect: () => void;
+  dbConnected: boolean;
+  isSyncing: boolean;
+  lastSync?: string;
+  isLiveMode: boolean;
+  onToggleLiveMode: (enabled: boolean) => void;
+  profileName?: string;
+  profilePicture?: string;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, isAdmin, onLogout }) => {
+export const Sidebar: React.FC<SidebarProps> = ({
+  activeTab,
+  setActiveTab,
+  isAdmin,
+  onLogout,
+  googleConnected,
+  googleClientIdPresent,
+  onGoogleConnect,
+  dbConnected,
+  isSyncing,
+  lastSync,
+  isLiveMode,
+  onToggleLiveMode,
+  profileName,
+  profilePicture
+}) => {
+  const [showQuick, setShowQuick] = useState(true);
+
   return (
     <div className="w-64 h-full bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-r border-slate-200 dark:border-slate-800/60 flex flex-col z-40 relative">
       <div className="flex-1 overflow-y-auto py-6 px-4 space-y-2 mt-4">
@@ -62,6 +94,63 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, isAdm
             </button>
           )
         })}
+
+        <div className="mt-5 pt-5 border-t border-slate-200 dark:border-slate-800">
+          <button
+            type="button"
+            onClick={() => setShowQuick((v) => !v)}
+            className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+          >
+            <span>Quick Controls</span>
+            {showQuick ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+          </button>
+          {showQuick && (
+            <div className="mt-3 space-y-3 px-1">
+              <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-bold ${
+                googleConnected
+                  ? 'bg-emerald-50 dark:bg-emerald-900/30 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
+                  : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
+              }`}>
+                <span className={`inline-block w-2 h-2 rounded-full ${googleConnected ? 'bg-emerald-500' : 'bg-slate-400'}`}></span>
+                Google {googleConnected ? 'Connected' : 'Disconnected'}
+              </div>
+
+              {!googleConnected && (
+                <button
+                  onClick={onGoogleConnect}
+                  disabled={!googleClientIdPresent}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-indigo-50 dark:bg-slate-800 text-indigo-700 dark:text-white text-xs font-bold border border-indigo-200 dark:border-slate-700 hover:bg-indigo-100 disabled:opacity-60 disabled:cursor-not-allowed"
+                  title={!googleClientIdPresent ? 'Set VITE_GOOGLE_CLIENT_ID to enable Google login' : 'Connect Google'}
+                >
+                  <PlugZap className="w-4 h-4" />
+                  {googleClientIdPresent ? 'Connect Google' : 'Google ID Missing'}
+                </button>
+              )}
+
+              <DatabaseSyncControl
+                isConnected={dbConnected}
+                isSyncing={isSyncing}
+                lastSync={lastSync}
+                isLiveMode={isLiveMode}
+                onToggleLiveMode={onToggleLiveMode}
+              />
+
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+                {profilePicture ? (
+                  <img src={profilePicture} alt="Profile" className="w-7 h-7 rounded-full border border-slate-300 dark:border-slate-600" />
+                ) : (
+                  <div className="w-7 h-7 rounded-full bg-indigo-100 dark:bg-indigo-900 flex items-center justify-center">
+                    <User className="w-4 h-4 text-indigo-600 dark:text-indigo-300" />
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-slate-700 dark:text-slate-200 truncate">{profileName || 'User'}</div>
+                  <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">API Connect</div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
       <div className="p-4 border-t border-slate-200 dark:border-slate-800/70">
         <button

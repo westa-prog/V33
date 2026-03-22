@@ -4,7 +4,6 @@ import { Driver, DutyStatus, ELDStatus, FollowUpStatus, EmailLogEntry, GoogleUse
 import { INITIAL_DRIVERS } from './constants';
 import { DriverTable } from './components/DriverTable';
 import { StatsCard } from './components/StatsCard';
-import { DatabaseSyncControl } from './components/DatabaseSyncControl';
 import { Login } from './components/Login';
 import { DriverReplies } from './components/DriverReplies';
 import { AIAssistant } from './components/AIAssistant';
@@ -109,7 +108,6 @@ const buildConnectionAutomationEmail = (driverName: string, dutyStatus?: DutySta
 };
 import {
   ArrowLeftRight,
-  CheckCircle2,
   MessageSquare,
   TrendingUp,
   Sparkles,
@@ -121,9 +119,6 @@ import {
   ShieldCheck,
   AlertTriangle,
   RefreshCcw,
-  User,
-  LogIn,
-  LogOut,
   Zap,
   RefreshCw,
   Send
@@ -984,6 +979,16 @@ const App: React.FC = () => {
           setActiveTab={setActiveTab} 
           isAdmin={isAdminUser}
           onLogout={handleLogout}
+          googleConnected={!!user}
+          googleClientIdPresent={!!googleClientId}
+          onGoogleConnect={handleGoogleLogin}
+          dbConnected={dbConnected}
+          isSyncing={isSyncing}
+          lastSync={lastSync}
+          isLiveMode={isLiveMode}
+          onToggleLiveMode={setIsLiveMode}
+          profileName={user?.name || authUser?.name}
+          profilePicture={user?.picture || authUser?.picture}
         />
       )}
       
@@ -993,55 +998,7 @@ const App: React.FC = () => {
           <BrandLogo open={true} onToggle={() => {}} theme={theme} onToggleTheme={toggleTheme} />
         </div>
 
-        <div className="flex items-center gap-4">
-          <div className={`hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-bold ${
-            user
-              ? 'bg-emerald-50 dark:bg-emerald-900/30 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
-              : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
-          }`}>
-            <span className={`inline-block w-2 h-2 rounded-full ${user ? 'bg-emerald-500' : 'bg-slate-400'}`}></span>
-            Google {user ? 'Connected' : 'Disconnected'}
-          </div>
-          {!user && (
-            <button
-              onClick={handleGoogleLogin}
-              disabled={!googleClientId}
-              title={!googleClientId ? 'Set VITE_GOOGLE_CLIENT_ID to enable Google login' : 'Connect Google'}
-              className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-50 dark:bg-slate-800 text-indigo-700 dark:text-white rounded-xl font-bold text-xs hover:bg-indigo-100 transition-all shadow-sm active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              <LogIn className="w-4 h-4 text-indigo-600" />
-              {googleClientId ? 'Connect Google' : 'Google ID Missing'}
-            </button>
-          )}
-          <DatabaseSyncControl
-            isConnected={dbConnected}
-            isSyncing={isSyncing}
-            lastSync={lastSync}
-            isLiveMode={isLiveMode}
-            onToggleLiveMode={setIsLiveMode}
-          />
-          {user && (
-            <div className="flex items-center gap-4">
-              <div className="hidden md:flex flex-col items-end pt-1">
-                <AnimatedText text={user.name} textClassName="text-sm tracking-tight text-slate-800 dark:text-white" underlineGradient="from-indigo-400 via-purple-400 to-pink-400" underlineHeight="h-0.5" underlineOffset="-bottom-1" />
-                <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1 mt-1">
-                  <CheckCircle2 className="w-3 h-3" /> API Connect
-                </p>
-              </div>
-              {user.picture ? (
-                <img src={user.picture} alt="Profile" className="w-10 h-10 rounded-full border-2 border-slate-200 dark:border-slate-700" />
-              ) : (
-                <div className="w-10 h-10 rounded-full bg-indigo-100 dark:bg-indigo-900 flex items-center justify-center border-2 border-indigo-200 dark:border-indigo-800">
-                  <User className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-                </div>
-              )}
-              <div className="h-6 w-px bg-slate-200 dark:bg-slate-700 mx-1"></div>
-            </div>
-          )}
-          <button onClick={handleLogout} className="p-2 text-slate-400 hover:text-red-500 rounded-lg transition-colors bg-slate-100 dark:bg-slate-800/50 hover:bg-red-50 dark:hover:bg-red-900/20" title="Sign Out">
-            <LogOut className="w-5 h-5" />
-          </button>
-        </div>
+        <div className="flex items-center gap-4"></div>
       </header>
 
       <main className="flex-1 overflow-y-auto p-4 md:p-8 pb-32">

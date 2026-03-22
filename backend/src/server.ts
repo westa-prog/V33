@@ -283,10 +283,12 @@ app.post('/api/admin/create-user', async (req, res) => {
 
         const credentialEmailResult = await sendCustomBroadcastEmail([normalizedAdminEmail], subject, message, []);
         if (!credentialEmailResult.ok) {
-            res.status(502).json({
-                error: `User created, but failed to send credential email to admin: ${credentialEmailResult.error || 'Unknown SMTP error'}`,
-                userCreated: true,
-                loginEmail: pseudoEmail
+            res.json({
+                success: true,
+                user: data.user,
+                loginEmail: pseudoEmail,
+                credentialEmailSent: false,
+                warning: `Credential email could not be delivered: ${credentialEmailResult.error || 'Unknown SMTP error'}`
             });
             return;
         }
