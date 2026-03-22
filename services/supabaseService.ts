@@ -170,6 +170,15 @@ const hydrateCreatorMap = async (rows: any[]) => {
     return map;
 };
 
+const fetchDriverRecord = async (driverId: string) => {
+    const { data } = await supabase
+        .from('drivers_new')
+        .select('*, companies(id,name,board_id)')
+        .eq('id', driverId)
+        .maybeSingle();
+    return data || null;
+};
+
 export const fetchDrivers = async (_ownerId: string): Promise<Driver[]> => {
     const { data } = await supabase
         .from('drivers_new')
@@ -307,14 +316,18 @@ export const subscribeToDrivers = (
         .on('postgres_changes', { event: '*', schema: 'public', table: 'drivers_new' }, async (payload: any) => {
             try {
                 if (payload?.eventType === 'INSERT' && payload?.new) {
-                    const creatorMap = await hydrateCreatorMap([payload.new]);
-                    const inserted = mapDbToDriver(payload.new, creatorMap);
+                    const fullRow = await fetchDriverRecord(String(payload.new.id || ''));
+                    const sourceRow = fullRow || payload.new;
+                    const creatorMap = await hydrateCreatorMap([sourceRow]);
+                    const inserted = mapDbToDriver(sourceRow, creatorMap);
                     currentDrivers = [inserted, ...currentDrivers.filter((d) => d.id !== inserted.id)];
                     callback(currentDrivers);
                     onEvent?.('INSERT', inserted);
                 } else if (payload?.eventType === 'UPDATE' && payload?.new) {
-                    const creatorMap = await hydrateCreatorMap([payload.new]);
-                    const updated = mapDbToDriver(payload.new, creatorMap);
+                    const fullRow = await fetchDriverRecord(String(payload.new.id || ''));
+                    const sourceRow = fullRow || payload.new;
+                    const creatorMap = await hydrateCreatorMap([sourceRow]);
+                    const updated = mapDbToDriver(sourceRow, creatorMap);
                     currentDrivers = currentDrivers.map((d) => d.id === updated.id ? updated : d);
                     callback(currentDrivers);
                     onEvent?.('UPDATE', updated);
