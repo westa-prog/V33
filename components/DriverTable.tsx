@@ -577,7 +577,7 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                   </select>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  {driver.eldStatus === ELDStatus.DISCONNECTED ? (
+                  {driver.eldStatus === ELDStatus.DISCONNECTED && (driver.dutyStatus === DutyStatus.DRIVING || driver.dutyStatus === DutyStatus.ON_DUTY) ? (
                     <div className="flex flex-col gap-1.5">
                       {(() => {
                         const lastSent = driver.lastSentAt ? new Date(driver.lastSentAt).getTime() : 0;
@@ -614,7 +614,7 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                                 ? 'Sending...'
                                 : isCooldowned
                                   ? `Available in ${formatCountdown(remainingMs)}`
-                                  : 'Send Follow-Up'}
+                                  : 'Send Alert'}
                             </button>
                             <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
                               Last Sent: {driver.lastSentAt ? new Date(driver.lastSentAt).toLocaleString(undefined, {

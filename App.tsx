@@ -581,14 +581,16 @@ const App: React.FC = () => {
   const processAlertLogic = useCallback(async (driver: Driver) => {
     const isDisconnected = driver.eldStatus === ELDStatus.DISCONNECTED;
     const isAtWork = [DutyStatus.DRIVING, DutyStatus.ON_DUTY].includes(driver.dutyStatus);
+    const now = new Date().getTime();
+    const lastSentRaw = driver.lastSentAt || driver.lastEmailTime;
+    const lastSent = lastSentRaw ? new Date(lastSentRaw).getTime() : 0;
+    const oneHour = 60 * 60 * 1000;
+    const canSendNow = !lastSent || (now - lastSent) >= oneHour;
 
-    if (isDisconnected && isAtWork && !driver.emailSent && !driver.hasPendingAlert) {
-      if (driver.lastEmailTime) {
-        const lastSent = new Date(driver.lastEmailTime).getTime();
-        const now = new Date().getTime();
-        if (now - lastSent < 60 * 60 * 1000) return;
+    if (isDisconnected && isAtWork) {
+      if (driver.hasPendingAlert !== canSendNow) {
+        setDrivers(prev => prev.map(d => d.id === driver.id ? { ...d, hasPendingAlert: canSendNow } : d));
       }
-      setDrivers(prev => prev.map(d => d.id === driver.id ? { ...d, hasPendingAlert: true } : d));
     } else if (!isDisconnected && driver.hasPendingAlert) {
       setDrivers(prev => prev.map(d => d.id === driver.id ? { ...d, hasPendingAlert: false } : d));
     } else if (!isDisconnected && driver.emailSent) {

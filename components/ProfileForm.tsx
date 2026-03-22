@@ -32,8 +32,12 @@ export const ProfileForm: React.FC<ProfileFormProps> = ({ drivers, emailLogs, on
 
     // Enrich drivers with calculated statuses
     const enrichedDrivers = useMemo(() => {
-        const now = new Date();
+        const now = currentTime;
         const todayStr = now.toDateString();
+        const dayStamp = (value: string | Date) => {
+            const d = new Date(value);
+            return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+        };
 
         return filteredDrivers.map(driver => {
             let status: 'ok' | 'warning' | '3_day_pending' | '5_day_pending' = 'ok';
@@ -52,7 +56,7 @@ export const ProfileForm: React.FC<ProfileFormProps> = ({ drivers, emailLogs, on
 
             if (driver.lastPFUpdate) {
                 const lastUpdate = new Date(driver.lastPFUpdate);
-                daysInactive = Math.floor((now.getTime() - lastUpdate.getTime()) / (1000 * 60 * 60 * 24));
+                daysInactive = Math.floor((dayStamp(now) - dayStamp(lastUpdate)) / (1000 * 60 * 60 * 24));
 
                 if (daysInactive >= 5) status = '5_day_pending';
                 else if (daysInactive >= 3) status = '3_day_pending';
@@ -66,7 +70,9 @@ export const ProfileForm: React.FC<ProfileFormProps> = ({ drivers, emailLogs, on
                     (!driver.last5DayEmail || new Date(driver.last5DayEmail).getTime() < lastUpdate.getTime());
 
                 if (latestReminderEmail) {
-                    if (lastUpdate.getTime() > new Date(latestReminderEmail).getTime()) {
+                    // Compare by date (not exact time) so setting PF date to "today"
+                    // immediately resolves "Waiting" in the current cycle.
+                    if (dayStamp(lastUpdate) >= dayStamp(latestReminderEmail)) {
                         responseResult = 'updated';
                     } else if (status === '5_day_pending') {
                         responseResult = 'ignored';
@@ -351,10 +357,7 @@ export const ProfileForm: React.FC<ProfileFormProps> = ({ drivers, emailLogs, on
                                         value={driver.lastPFUpdate ? new Date(driver.lastPFUpdate).toISOString().split('T')[0] : ''}
                                         onChange={(e) => {
                                             if (e.target.value) {
-                                                const date = new Date(e.target.value);
-                                                // Adjust for timezone to keep exact date clicked
-                                                date.setMinutes(date.getMinutes() + date.getTimezoneOffset());
-                                                onUpdatePFDate(driver.id, date.toISOString());
+                                                onUpdatePFDate(driver.id, `${e.target.value}T12:00:00.000Z`);
                                             } else {
                                                 onUpdatePFDate(driver.id, '');
                                             }
