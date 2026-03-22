@@ -47,6 +47,10 @@ begin
     from information_schema.columns
     where table_schema='public' and table_name='companies' and column_name='board'
   ) then
+    -- Legacy schema could keep companies.board as NOT NULL;
+    -- normalized flow writes board_id, so loosen old constraint for compatibility.
+    execute 'alter table public.companies alter column board drop not null';
+
     update public.companies
     set board_id = case
       when coalesce(board_id, '') <> '' then board_id
