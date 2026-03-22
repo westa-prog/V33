@@ -38,6 +38,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, la
     const [backendStatus, setBackendStatus] = useState<{
         status: string;
         emailConfigured: boolean;
+        emailMode?: 'smtp' | 'resend' | 'smtp+resend' | 'simulation';
+        smtpConfigured?: boolean;
+        resendConfigured?: boolean;
         uploadsEnabled: boolean;
     } | null>(null);
     const [statusLoading, setStatusLoading] = useState(false);
@@ -274,12 +277,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, la
                                 <span className="text-sm font-bold text-slate-700 dark:text-slate-200">Email Transport</span>
                             </div>
                             <p className={`text-2xl font-black ${backendStatus?.emailConfigured ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
-                                {backendStatus?.emailConfigured ? 'READY' : 'SIMULATION'}
+                                {backendStatus?.emailConfigured
+                                    ? backendStatus.emailMode === 'smtp+resend'
+                                        ? 'SMTP + RESEND'
+                                        : backendStatus.emailMode === 'resend'
+                                            ? 'RESEND'
+                                            : 'SMTP'
+                                    : 'SIMULATION'}
                             </p>
                             <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
                                 {backendStatus?.emailConfigured
-                                    ? 'SMTP configured. Broadcasts are sent in live mode.'
-                                    : 'SMTP missing means broadcasts run in safe simulation mode.'}
+                                    ? backendStatus.emailMode === 'resend'
+                                        ? 'Resend is configured for live outbound email.'
+                                        : backendStatus.emailMode === 'smtp+resend'
+                                            ? 'SMTP is primary and Resend is available as fallback.'
+                                            : 'SMTP is configured for live outbound email.'
+                                    : 'No live provider is configured yet, so broadcasts stay in simulation mode.'}
                             </p>
                         </div>
 

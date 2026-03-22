@@ -50,6 +50,8 @@ Required Render environment variables:
 - `SMTP_USER`
 - `SMTP_PASS`
 - `SMTP_FROM`
+- `RESEND_API_KEY` optional, can be used as the primary/fallback mail provider
+- `RESEND_FROM` required when using Resend
 
 Important:
 
@@ -69,11 +71,15 @@ Important:
 4. Add backend env values in `backend/.env`:
    - `SUPABASE_URL`
    - `SUPABASE_SERVICE_ROLE_KEY`
+   - either SMTP settings:
    - `SMTP_HOST`
    - `SMTP_PORT`
    - `SMTP_USER`
    - `SMTP_PASS`
    - `SMTP_FROM`
+   - or Resend settings:
+   - `RESEND_API_KEY`
+   - `RESEND_FROM`
 5. Run frontend dev server: `npm run dev`
 6. Run backend dev server: `npm run dev:server`
 

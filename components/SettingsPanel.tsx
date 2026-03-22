@@ -41,6 +41,17 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ currentUser, isAdm
   const [activeTemplateKey, setActiveTemplateKey] = useState<keyof EmailTemplateMap>('connection_driving');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string>('');
+  const [emailDiagnostics, setEmailDiagnostics] = useState<{
+    emailMode?: string;
+    smtpHost?: string;
+    smtpPort?: number;
+    smtpFrom?: string;
+    error?: string;
+    message?: string;
+  } | null>(null);
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [testingSend, setTestingSend] = useState(false);
+  const [testRecipient, setTestRecipient] = useState(currentUser?.email || '');
   const templateOptions: Array<{ key: keyof EmailTemplateMap; label: string }> = [
     { key: 'connection_driving', label: 'Connection: Driving + Disconnected' },
     { key: 'connection_onduty', label: 'Connection: On Duty + Disconnected' },
@@ -371,6 +382,44 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ currentUser, isAdm
     }
   };
 
+  const runEmailConnectionTest = async () => {
+    setTestingConnection(true);
+    setMessage('');
+    try {
+      const res = await fetch(apiUrl('/api/email/test-connection'), {
+        method: 'POST'
+      });
+      const data = await res.json().catch(() => ({}));
+      setEmailDiagnostics(data);
+      if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+      setMessage(data?.message || 'SMTP connection verified successfully.');
+    } catch (e: any) {
+      setMessage(e.message || 'Failed to verify SMTP connection');
+    } finally {
+      setTestingConnection(false);
+    }
+  };
+
+  const runEmailSendTest = async () => {
+    setTestingSend(true);
+    setMessage('');
+    try {
+      const res = await fetch(apiUrl('/api/email/test-send'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: testRecipient })
+      });
+      const data = await res.json().catch(() => ({}));
+      setEmailDiagnostics((prev) => ({ ...prev, ...data }));
+      if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+      setMessage(data?.message || `Test email sent to ${testRecipient}.`);
+    } catch (e: any) {
+      setMessage(e.message || 'Failed to send test email');
+    } finally {
+      setTestingSend(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800">
@@ -409,6 +458,50 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ currentUser, isAdm
 
       {isAdmin && (
         <>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800">
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-3">Email Diagnostics</h3>
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <button
+                  type="button"
+                  onClick={runEmailConnectionTest}
+                  disabled={testingConnection}
+                  className="px-4 py-2 rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 text-sm font-bold disabled:opacity-50"
+                >
+                  {testingConnection ? 'Testing SMTP...' : 'Test SMTP Connection'}
+                </button>
+                <div className="flex gap-2">
+                  <input
+                    type="email"
+                    value={testRecipient}
+                    onChange={(e) => setTestRecipient(e.target.value)}
+                    placeholder="test@example.com"
+                    className="flex-1 px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={runEmailSendTest}
+                    disabled={testingSend || !testRecipient}
+                    className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold disabled:opacity-50"
+                  >
+                    {testingSend ? 'Sending...' : 'Send Test Email'}
+                  </button>
+                </div>
+              </div>
+
+              {emailDiagnostics && (
+                <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 p-4 text-sm">
+                  <div><span className="font-bold">Mode:</span> {emailDiagnostics.emailMode || 'unknown'}</div>
+                  <div><span className="font-bold">SMTP Host:</span> {emailDiagnostics.smtpHost || 'not set'}</div>
+                  <div><span className="font-bold">SMTP Port:</span> {emailDiagnostics.smtpPort || 'not set'}</div>
+                  <div><span className="font-bold">From:</span> {emailDiagnostics.smtpFrom || 'not set'}</div>
+                  {emailDiagnostics.message && <div><span className="font-bold">Result:</span> {emailDiagnostics.message}</div>}
+                  {emailDiagnostics.error && <div className="text-red-600 dark:text-red-400"><span className="font-bold">Error:</span> {emailDiagnostics.error}</div>}
+                </div>
+              )}
+            </div>
+          </div>
+
           <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800">
             <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-3">Employee Personalization</h3>
             {loading ? (

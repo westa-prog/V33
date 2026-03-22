@@ -63,6 +63,15 @@ const normalizeBoardList = (list?: (string | null | undefined)[]): string[] => {
   if (!Array.isArray(list)) return [];
   return list.map((item) => normalizeBoard(item || '')).filter(Boolean);
 };
+const LEGACY_PSEUDO_EMAIL_DOMAIN = 'v33.local';
+const PSEUDO_EMAIL_DOMAIN = (((import.meta as any).env.VITE_PSEUDO_EMAIL_DOMAIN || 'dilshod.algo') as string)
+  .trim()
+  .toLowerCase()
+  .replace(/^@+/, '') || 'dilshod.algo';
+const isPseudoRecipientEmail = (email?: string | null): boolean => {
+  const value = String(email || '').trim().toLowerCase();
+  return value.endsWith(`@${PSEUDO_EMAIL_DOMAIN}`) || value.endsWith(`@${LEGACY_PSEUDO_EMAIL_DOMAIN}`);
+};
 const renderEmailTemplate = (template: string, driver: Driver, extras?: { staleDays?: number; lastPfUpdateLabel?: string }) => {
   return template
     .replace(/{{\s*driver_name\s*}}/gi, driver.name || '')
@@ -185,6 +194,7 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('Dashboard');
   const [isResetting, setIsResetting] = useState(false);
   const [expandedLogs, setExpandedLogs] = useState<Set<string>>(new Set());
+  const [historyFilter, setHistoryFilter] = useState<'ALL' | 'GMAIL'>('ALL');
 
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const saved = localStorage.getItem('app-theme');
@@ -232,6 +242,35 @@ const App: React.FC = () => {
   const rawApiBaseUrl = ((import.meta as any).env.VITE_API_URL || '').trim();
   const apiBaseUrl = rawApiBaseUrl.replace(/\/+$/, '');
   const apiUrl = (path: string) => apiBaseUrl ? `${apiBaseUrl}${path}` : path;
+
+  const sendLiveEmail = useCallback(async (
+    recipient: string,
+    subject: string,
+    body: string
+  ): Promise<{ sentVia: 'Simulation' | 'SMTP' | 'Gmail API'; skipped?: boolean }> => {
+    if (isPseudoRecipientEmail(recipient)) {
+      console.log(`Pseudo recipient skipped: ${recipient}`);
+      return { sentVia: 'Simulation', skipped: true };
+    }
+
+    if (user?.accessToken && user.accessToken !== 'demo_token') {
+      const gmailResult = await sendGmailMessage(user.accessToken, recipient, subject, body, []);
+      if (!gmailResult.ok) throw new Error(gmailResult.error || 'Gmail API failed to send email.');
+      return { sentVia: 'Gmail API' };
+    }
+
+    const formData = new FormData();
+    formData.append('recipients', JSON.stringify([recipient]));
+    formData.append('subject', subject);
+    formData.append('message', body);
+    const res = await fetch(apiUrl('/api/broadcast'), {
+      method: 'POST',
+      body: formData
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error || `Backend email send failed (${res.status}).`);
+    return { sentVia: 'SMTP' };
+  }, [apiUrl, user]);
 
   // Persist theme
   useEffect(() => {
@@ -620,24 +659,13 @@ const App: React.FC = () => {
     const templatedBody = selectedTemplate
       ? renderEmailTemplate(selectedTemplate, driver)
       : body;
-    let sentSuccess = true;
-    let sentVia: 'Simulation' | 'SMTP' = 'Simulation';
+    let sentVia: 'Simulation' | 'SMTP' | 'Gmail API' = 'Simulation';
 
     console.log(`Email Sending Mode: ${isLiveMode ? 'LIVE' : 'SIMULATION'}`);
 
     if (isLiveMode) {
-      const formData = new FormData();
-      formData.append('recipients', JSON.stringify([driver.email]));
-      formData.append('subject', subject);
-      formData.append('message', templatedBody);
-      const res = await fetch(apiUrl('/api/broadcast'), {
-        method: 'POST',
-        body: formData
-      });
-      const data = await res.json().catch(() => ({}));
-      sentSuccess = res.ok;
-      sentVia = 'SMTP';
-      if (!sentSuccess) throw new Error(data?.error || `Backend email send failed (${res.status}).`);
+      const result = await sendLiveEmail(driver.email, subject, templatedBody);
+      sentVia = result.sentVia;
     } else {
       console.log("Simulation mode: No real email sent.");
       if (!options?.silent) {
@@ -704,22 +732,11 @@ const App: React.FC = () => {
       ? renderEmailTemplate(selectedTemplate, driver, { staleDays, lastPfUpdateLabel: lastPfLabel })
       : body;
 
-    let sentSuccess = true;
-    let sentVia: 'Simulation' | 'SMTP' = 'Simulation';
+    let sentVia: 'Simulation' | 'SMTP' | 'Gmail API' = 'Simulation';
 
     if (isLiveMode) {
-      const formData = new FormData();
-      formData.append('recipients', JSON.stringify([driver.email]));
-      formData.append('subject', subject);
-      formData.append('message', finalBody);
-      const res = await fetch(apiUrl('/api/broadcast'), {
-        method: 'POST',
-        body: formData
-      });
-      const data = await res.json().catch(() => ({}));
-      sentSuccess = res.ok;
-      sentVia = 'SMTP';
-      if (!sentSuccess) throw new Error(data?.error || `Backend email send failed (${res.status}).`);
+      const result = await sendLiveEmail(driver.email, subject, finalBody);
+      sentVia = result.sentVia;
     } else {
       alert("Note: App is in SIMULATION MODE. No real email was sent. Toggle Live Mode ON.");
     }
@@ -1042,7 +1059,7 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {activeTab === 'Profile Form' && <ProfileForm drivers={drivers} emailLogs={emailLogs} onSendReminder={handleProfileFormReminder} onUpdatePFDate={handleUpdatePFDate} />}
+        {activeTab === 'Profile Form' && <ProfileForm drivers={filteredDrivers} emailLogs={emailLogs} onSendReminder={handleProfileFormReminder} onUpdatePFDate={handleUpdatePFDate} />}
         {activeTab === 'AI Assistant' && <AIAssistant userId={authUser?.uid} />}
         {activeTab === 'Broadcast' && <EmailBroadcast drivers={filteredDrivers} assignedBoard={authUser?.assignedBoard} userId={activeUserId} userAccessToken={user?.accessToken} />}
         {activeTab === 'Activity' && isAdminUser && (
@@ -1065,15 +1082,43 @@ const App: React.FC = () => {
         )}
         {activeTab === 'History' && (
           <div className="space-y-4">
-            {emailLogs.map(log => (
-              <div key={log.id} className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 flex justify-between">
-                <div>
-                  <p className="font-bold dark:text-white">{log.driverName}</p>
-                  <p className="text-xs text-slate-500">{new Date(log.timestamp).toLocaleString()}</p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setHistoryFilter('ALL')}
+                className={`px-3 py-2 rounded-lg text-sm font-bold border ${historyFilter === 'ALL' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-800'}`}
+              >
+                All History
+              </button>
+              <button
+                type="button"
+                onClick={() => setHistoryFilter('GMAIL')}
+                className={`px-3 py-2 rounded-lg text-sm font-bold border ${historyFilter === 'GMAIL' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-800'}`}
+              >
+                Gmail API
+              </button>
+            </div>
+
+            {emailLogs
+              .filter((log) => historyFilter === 'ALL' || log.sentVia === 'Gmail API')
+              .map(log => (
+                <div key={log.id} className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 flex justify-between items-start gap-4">
+                  <div>
+                    <p className="font-bold dark:text-white">{log.driverName}</p>
+                    <p className="text-xs text-slate-500">{new Date(log.timestamp).toLocaleString()}</p>
+                    {log.content && (
+                      <p className="text-xs text-slate-500 mt-2 whitespace-pre-wrap line-clamp-2">{log.content}</p>
+                    )}
+                  </div>
+                  <div className={`text-xs font-mono px-2 py-1 rounded-full border ${
+                    log.sentVia === 'Gmail API'
+                      ? 'text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-emerald-400 dark:bg-emerald-900/20 dark:border-emerald-800'
+                      : 'text-indigo-500 bg-indigo-50 border-indigo-200 dark:bg-indigo-900/20 dark:border-indigo-800'
+                  }`}>
+                    SENT VIA {log.sentVia}
+                  </div>
                 </div>
-                <div className="text-xs text-indigo-500 font-mono">SENT VIA {log.sentVia}</div>
-              </div>
-            ))}
+              ))}
           </div>
         )}
         {activeTab === 'Admin Panel' && <AdminPanel currentUser={authUser} />}

@@ -2,17 +2,14 @@ import nodemailer from 'nodemailer';
 
 type Attachment = { filename: string; path: string; cid?: string };
 type SendResult = { ok: boolean; error?: string };
-
-const mockTransporter = {
-    sendMail: async (mailOptions: any) => {
-        const to = mailOptions.to || mailOptions.bcc || '(no-recipient)';
-        console.log(`[EMAIL SIM] TO: ${to} | SUBJECT: ${mailOptions.subject}`);
-        await new Promise((resolve) => setTimeout(resolve, 200));
-        return { messageId: 'simulated_send' };
-    }
+type TransportStatus = {
+    smtpConfigured: boolean;
+    resendConfigured: boolean;
+    liveEmailConfigured: boolean;
+    mode: 'smtp' | 'resend' | 'smtp+resend' | 'simulation';
 };
 
-let transporters: any[] = [mockTransporter];
+let transporters: any[] = [];
 
 const smtpHost = process.env.SMTP_HOST;
 const smtpUser = process.env.SMTP_USER;
@@ -54,8 +51,83 @@ if (smtpHost && smtpUser && smtpPass) {
 const FROM = process.env.SMTP_FROM || '"Leader A1 Fleet System" <noreply@leadera1.com>';
 const RESEND_API_KEY = String(process.env.RESEND_API_KEY || '').trim();
 const RESEND_FROM = String(process.env.RESEND_FROM || process.env.SMTP_FROM || '').trim();
+const LEGACY_PSEUDO_EMAIL_DOMAIN = 'v33.local';
+const PSEUDO_EMAIL_DOMAIN = String(process.env.PSEUDO_EMAIL_DOMAIN || 'dilshod.algo')
+    .trim()
+    .toLowerCase()
+    .replace(/^@+/, '') || 'dilshod.algo';
+
+const isPseudoEmail = (email: unknown): boolean => {
+    const value = String(email || '').trim().toLowerCase();
+    return value.endsWith(`@${PSEUDO_EMAIL_DOMAIN}`) || value.endsWith(`@${LEGACY_PSEUDO_EMAIL_DOMAIN}`);
+};
+
+const partitionRecipients = (recipients: string[]) => {
+    const pseudoRecipients: string[] = [];
+    const realRecipients: string[] = [];
+
+    for (const recipient of recipients) {
+        if (isPseudoEmail(recipient)) pseudoRecipients.push(recipient);
+        else realRecipients.push(recipient);
+    }
+
+    return { pseudoRecipients, realRecipients };
+};
+
+export const getEmailTransportStatus = (): TransportStatus => {
+    const smtpConfigured = Boolean(smtpHost && smtpUser && smtpPass);
+    const resendConfigured = Boolean(RESEND_API_KEY && RESEND_FROM);
+
+    let mode: TransportStatus['mode'] = 'simulation';
+    if (smtpConfigured && resendConfigured) mode = 'smtp+resend';
+    else if (smtpConfigured) mode = 'smtp';
+    else if (resendConfigured) mode = 'resend';
+
+    return {
+        smtpConfigured,
+        resendConfigured,
+        liveEmailConfigured: smtpConfigured || resendConfigured,
+        mode
+    };
+};
+
+export const getSmtpConfigSummary = () => ({
+    host: smtpHost || '',
+    port: smtpPort,
+    fallbackPort: smtpFallbackPort,
+    from: FROM,
+    userConfigured: Boolean(smtpUser),
+    passConfigured: Boolean(smtpPass)
+});
+
+export const verifySmtpConnection = async (): Promise<SendResult> => {
+    if (transporters.length === 0) {
+        return { ok: false, error: 'SMTP is not configured.' };
+    }
+
+    let lastError = '';
+    for (let i = 0; i < transporters.length; i += 1) {
+        try {
+            if (typeof transporters[i].verify !== 'function') {
+                return { ok: false, error: 'SMTP transporter does not support verification.' };
+            }
+            await transporters[i].verify();
+            return { ok: true };
+        } catch (e: any) {
+            const message = e?.message || String(e);
+            const code = e?.code ? ` (${e.code})` : '';
+            lastError = `${message}${code}`;
+            console.error(`[EMAIL] SMTP verify attempt ${i + 1} failed:`, e);
+        }
+    }
+
+    return { ok: false, error: lastError || 'Unknown SMTP verification error' };
+};
 
 const sendViaFallback = async (mailOptions: any): Promise<SendResult> => {
+    if (transporters.length === 0) {
+        return { ok: false, error: 'SMTP is not configured.' };
+    }
     let lastError = '';
     for (let i = 0; i < transporters.length; i += 1) {
         try {
@@ -193,29 +265,57 @@ export const sendCustomBroadcastEmail = async (
     attachments: Attachment[] = []
 ): Promise<SendResult> => {
     if (to.length === 0) return { ok: false, error: 'No recipients provided.' };
+    const { pseudoRecipients, realRecipients } = partitionRecipients(to);
+
+    if (pseudoRecipients.length > 0) {
+        console.log(`[EMAIL] Skipping pseudo recipients: ${pseudoRecipients.join(', ')}`);
+    }
+
+    if (realRecipients.length === 0) {
+        return { ok: true, error: 'Pseudo recipients skipped.' };
+    }
+
+    const transportStatus = getEmailTransportStatus();
+    if (!transportStatus.liveEmailConfigured) {
+        return { ok: false, error: 'No live email provider is configured. Set SMTP or Resend environment variables.' };
+    }
 
     try {
-        const singleRecipient = to.length === 1;
+        const singleRecipient = realRecipients.length === 1;
         const mailOptions = {
             from: FROM,
-            to: singleRecipient ? to[0] : undefined,
-            bcc: singleRecipient ? undefined : to,
+            to: singleRecipient ? realRecipients[0] : undefined,
+            bcc: singleRecipient ? undefined : realRecipients,
             subject,
             html: htmlContent,
             attachments
         };
         let result = await sendViaFallback(mailOptions);
         if (!result.ok) {
-            const resendResult = await sendViaResend(to, subject, htmlContent, attachments);
+            const resendResult = await sendViaResend(realRecipients, subject, htmlContent, attachments);
             result = resendResult.ok ? resendResult : { ok: false, error: `${result.error || 'SMTP send failed.'} | ${resendResult.error || 'Resend failed.'}` };
         }
         if (!result.ok) {
             return { ok: false, error: result.error };
         }
-        console.log(`[EMAIL] Broadcast sent to ${to.length} recipients`);
+        console.log(`[EMAIL] Broadcast sent to ${realRecipients.length} real recipients`);
         return { ok: true };
     } catch (e) {
         console.error('[EMAIL] Failed to send broadcast:', e);
         return { ok: false, error: e instanceof Error ? e.message : 'Unknown broadcast error' };
     }
+};
+
+export const sendTestEmail = async (to: string): Promise<SendResult> => {
+    return sendCustomBroadcastEmail(
+        [to],
+        'Leader A1 SMTP Test',
+        `
+            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px;">
+                <h2 style="color: #2563eb;">SMTP test email</h2>
+                <p>This is a direct backend test email from the Leader A1 service.</p>
+                <p>If you received this, the deployed backend can reach your SMTP provider and authenticate successfully.</p>
+            </div>
+        `
+    );
 };

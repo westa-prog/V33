@@ -38,6 +38,8 @@ Gemini owns:
 The canonical backend routes are:
 
 - `GET /api/status`
+- `POST /api/email/test-connection`
+- `POST /api/email/test-send`
 - `POST /api/admin/create-user`
 - `POST /api/broadcast`
 
@@ -55,6 +57,40 @@ Response:
   "emailConfigured": true,
   "uploadsEnabled": true,
   "uptimeSeconds": 123
+}
+```
+
+### `POST /api/email/test-connection`
+
+Response:
+
+```json
+{
+  "success": true,
+  "emailMode": "smtp",
+  "smtpHost": "smtp.gmail.com",
+  "smtpPort": 587,
+  "smtpFrom": "Leader A1 Fleet Monitor <your-email@gmail.com>",
+  "message": "SMTP connection verified successfully."
+}
+```
+
+### `POST /api/email/test-send`
+
+Request body:
+
+```json
+{
+  "to": "you@example.com"
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Test email sent to you@example.com."
 }
 ```
 

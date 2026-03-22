@@ -6,7 +6,13 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { getDb } from './services/supabaseAdmin';
-import { sendCustomBroadcastEmail } from './services/emailSender';
+import {
+    getEmailTransportStatus,
+    getSmtpConfigSummary,
+    sendCustomBroadcastEmail,
+    sendTestEmail,
+    verifySmtpConnection
+} from './services/emailSender';
 
 dotenv.config();
 
@@ -121,12 +127,73 @@ const cleanupUploads = (files: Express.Multer.File[] = []) => {
 };
 
 app.get('/api/status', (req, res) => {
+    const emailStatus = getEmailTransportStatus();
+    const smtpSummary = getSmtpConfigSummary();
     res.json({
         status: 'online',
-        emailConfigured: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER),
+        emailConfigured: emailStatus.liveEmailConfigured,
+        emailMode: emailStatus.mode,
+        smtpConfigured: emailStatus.smtpConfigured,
+        resendConfigured: emailStatus.resendConfigured,
+        smtpHost: smtpSummary.host,
+        smtpPort: smtpSummary.port,
+        smtpFrom: smtpSummary.from,
         uploadsEnabled: true,
         uptimeSeconds: Math.round(process.uptime())
     });
+});
+
+app.post('/api/email/test-connection', async (req, res) => {
+    try {
+        const emailStatus = getEmailTransportStatus();
+        const smtpSummary = getSmtpConfigSummary();
+        const verifyResult = await verifySmtpConnection();
+
+        if (!verifyResult.ok) {
+            res.status(500).json({
+                success: false,
+                emailMode: emailStatus.mode,
+                smtpHost: smtpSummary.host,
+                smtpPort: smtpSummary.port,
+                smtpFrom: smtpSummary.from,
+                error: verifyResult.error
+            });
+            return;
+        }
+
+        res.json({
+            success: true,
+            emailMode: emailStatus.mode,
+            smtpHost: smtpSummary.host,
+            smtpPort: smtpSummary.port,
+            smtpFrom: smtpSummary.from,
+            message: 'SMTP connection verified successfully.'
+        });
+    } catch (e: any) {
+        console.error('[API] Email test-connection failed:', e);
+        res.status(500).json({ error: e.message || 'Failed to verify SMTP connection.' });
+    }
+});
+
+app.post('/api/email/test-send', async (req, res) => {
+    try {
+        const to = String(req.body?.to || '').trim().toLowerCase();
+        if (!isValidEmail(to)) {
+            res.status(400).json({ error: 'A valid recipient email is required.' });
+            return;
+        }
+
+        const sendResult = await sendTestEmail(to);
+        if (!sendResult.ok) {
+            res.status(500).json({ success: false, error: sendResult.error || 'Failed to send test email.' });
+            return;
+        }
+
+        res.json({ success: true, message: `Test email sent to ${to}.` });
+    } catch (e: any) {
+        console.error('[API] Email test-send failed:', e);
+        res.status(500).json({ error: e.message || 'Failed to send test email.' });
+    }
 });
 
 app.post('/api/auth/ensure-profile', async (req, res) => {

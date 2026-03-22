@@ -181,7 +181,7 @@ export const bulkAddDrivers = async (_userId: string, drivers: Driver[]) => {
     await supabase.from('drivers_new').insert(rows);
 };
 
-export const updateDriver = async (_userId: string, driverId: string, updates: Partial<Driver>) => {
+export const updateDriver = async (_userId: string, driverId: string, updates: Partial<Driver>, _ownerId?: string) => {
     const { id, ...dbUpdates } = mapDriverToDb(updates) as any;
     const cleanUpdates = Object.fromEntries(Object.entries(dbUpdates).filter(([_, v]) => v !== undefined));
     await supabase.from('drivers_new').update({
@@ -190,7 +190,7 @@ export const updateDriver = async (_userId: string, driverId: string, updates: P
     }).eq('id', driverId);
 };
 
-export const deleteDriver = async (_userId: string, driverId: string) => {
+export const deleteDriver = async (_userId: string, driverId: string, _ownerId?: string) => {
     await supabase.from('drivers_new').delete().eq('id', driverId);
 };
 
