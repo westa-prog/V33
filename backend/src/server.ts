@@ -554,7 +554,7 @@ app.post('/api/admin/repair-users', async (req, res) => {
 
 app.post('/api/drivers/create', async (req, res) => {
     try {
-        const { acting_user_id, name, email, company, board, deviceType, appVersion, eldStatus, dutyStatus, followUp } = req.body || {};
+        const { acting_user_id, name, email, company, company_id, board, deviceType, appVersion, eldStatus, dutyStatus, followUp } = req.body || {};
 
         if (!acting_user_id || !name || !email || !company) {
             res.status(400).json({ error: 'acting_user_id, name, email, and company are required.' });
@@ -566,6 +566,7 @@ app.post('/api/drivers/create', async (req, res) => {
         const normalizedEmail = String(email).trim().toLowerCase();
         const normalizedCompany = String(company).trim();
         const normalizedBoardInput = normalizeBoardName(String(board || '').trim());
+        const normalizedBoardId = normalizedBoardInput.toUpperCase().replace('BOARD ', '');
 
         if (!isUuid(normalizedActingUserId)) {
             res.status(400).json({ error: 'A valid acting_user_id is required.' });
@@ -645,15 +646,44 @@ app.post('/api/drivers/create', async (req, res) => {
             }
         }
 
+        let resolvedCompanyId: string | null = null;
+        if (company_id && isUuid(String(company_id))) {
+            resolvedCompanyId = String(company_id);
+        } else {
+            const targetBoardId = normalizedBoardId || (effectiveBoard.toUpperCase().replace('BOARD ', ''));
+            const { data: existingCompany } = await supabase
+                .from('companies')
+                .select('id')
+                .eq('name', normalizedCompany)
+                .eq('board_id', targetBoardId)
+                .maybeSingle();
+            if (existingCompany?.id) {
+                resolvedCompanyId = existingCompany.id;
+            } else {
+                const { data: insertedCompany, error: insertCompanyError } = await supabase
+                    .from('companies')
+                    .insert({
+                        name: normalizedCompany,
+                        board_id: targetBoardId,
+                        created_by: isAdmin ? profileId : adminId
+                    })
+                    .select('id')
+                    .single();
+                if (!insertCompanyError && insertedCompany?.id) {
+                    resolvedCompanyId = insertedCompany.id;
+                }
+            }
+        }
+
         const nowIso = new Date().toISOString();
         const driverId = crypto.randomUUID();
         const driverRow = {
             id: driverId,
-            user_id: ownerUserId,
             name: normalizedName,
             email: normalizedEmail,
-            company: normalizedCompany,
-            board: effectiveBoard,
+            company_id: resolvedCompanyId,
+            board_id: effectiveBoard.toUpperCase().replace('BOARD ', ''),
+            created_by: normalizedActingUserId,
             devicetype: String(deviceType || ''),
             appversion: String(appVersion || ''),
             eldstatus: String(eldStatus || 'Connected'),
@@ -665,7 +695,7 @@ app.post('/api/drivers/create', async (req, res) => {
             updated_at: nowIso
         };
 
-        const { error: insertError } = await supabase.from('drivers').insert(driverRow);
+        const { error: insertError } = await supabase.from('drivers_new').insert(driverRow);
         if (insertError) {
             res.status(500).json({ error: insertError.message });
             return;
@@ -691,6 +721,8 @@ app.post('/api/drivers/create', async (req, res) => {
                 id: driverId,
                 name: normalizedName,
                 email: normalizedEmail,
+                company_id: resolvedCompanyId,
+                board_id: effectiveBoard.toUpperCase().replace('BOARD ', ''),
                 company: normalizedCompany,
                 board: effectiveBoard
             }

@@ -45,6 +45,11 @@ export interface Driver {
   email: string;
   company: string;
   board: string;
+  companyId?: string | null;
+  boardId?: string | null;
+  createdBy?: string | null;
+  createdByName?: string | null;
+  createdByEmail?: string | null;
   deviceType: string;
   appVersion: string; // New field for Leader ELD App Version
   eldStatus: ELDStatus | null;
@@ -69,6 +74,12 @@ export interface GoogleUser {
   picture: string;
   accessToken: string;
   expiry: number;
+}
+
+export interface Company {
+  id: string;
+  name: string;
+  boardId: string | null;
 }
 
 export interface EmailTemplateMap {

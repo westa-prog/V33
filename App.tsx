@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Driver, DutyStatus, ELDStatus, FollowUpStatus, EmailLogEntry, GoogleUser, AuthUser, DriverReply, EmailTemplateMap } from './types';
+import { Driver, DutyStatus, ELDStatus, FollowUpStatus, EmailLogEntry, GoogleUser, AuthUser, DriverReply, EmailTemplateMap, Company } from './types';
 import { INITIAL_DRIVERS } from './constants';
 import { DriverTable } from './components/DriverTable';
 import { StatsCard } from './components/StatsCard';
@@ -19,6 +19,7 @@ import {
   initializeUserDatabase,
   fetchUserProfile,
   subscribeToDrivers,
+  subscribeToCompanies,
   subscribeToEmailLogs,
   subscribeToDriverReplies,
   updateDriver as updateDriverInSupabase,
@@ -128,6 +129,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGoogleLogin } from '@react-oauth/google';
+import { Toaster, toast } from 'react-hot-toast';
 
 const BrandLogo = ({ open, onToggle, theme, onToggleTheme }: { open: boolean, onToggle: () => void, theme: 'light' | 'dark', onToggleTheme: () => void }) => (
   <div className="flex items-center justify-between gap-3 mb-8 px-2 relative">
@@ -223,7 +225,9 @@ const App: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<string | undefined>();
   const [dbConnected, setDbConnected] = useState(false);
+  const [companies, setCompanies] = useState<Company[]>([]);
   const autoSendingRef = useRef<Set<string>>(new Set());
+  const hasUserInteractedRef = useRef(false);
   const activeUserId = authUser?.uid;
   const googleClientId = ((window as any).__GOOGLE_CLIENT_ID__ || '').trim();
   const isAdminUser = authUser?.role === 'admin' || authUser?.email === 'westa@algogroup.us';
@@ -359,6 +363,12 @@ const App: React.FC = () => {
 
   // Initialize user profile and set up Supabase listeners
   useEffect(() => {
+    const markInteraction = () => { hasUserInteractedRef.current = true; };
+    window.addEventListener('click', markInteraction, { once: true });
+    return () => window.removeEventListener('click', markInteraction);
+  }, []);
+
+  useEffect(() => {
     if (!activeUserId) {
       setDbConnected(false);
       return;
@@ -394,10 +404,45 @@ const App: React.FC = () => {
 
     setupDatabase();
 
-    const unsubDrivers = subscribeToDrivers(driverOwnerUserId || activeUserId, (driversSnapshot) => {
-      setDrivers(driversSnapshot);
-      setLastSync(new Date().toISOString());
-    });
+    const unsubDrivers = subscribeToDrivers(
+      driverOwnerUserId || activeUserId,
+      (driversSnapshot) => {
+        setDrivers(driversSnapshot);
+        setLastSync(new Date().toISOString());
+      },
+      (eventType, changedDriver) => {
+        if (!changedDriver) return;
+        const creator = changedDriver.createdByName || changedDriver.createdByEmail || 'Unknown user';
+        if (eventType === 'INSERT') {
+          toast.success(`${creator} added ${changedDriver.name}`);
+        } else if (eventType === 'UPDATE') {
+          toast(`Updated: ${changedDriver.name}`);
+        } else if (eventType === 'DELETE') {
+          toast.error(`Removed: ${changedDriver.name || 'Driver'}`);
+        }
+        if (hasUserInteractedRef.current && eventType === 'INSERT') {
+          try {
+            const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(880, ctx.currentTime);
+            gain.gain.setValueAtTime(0.03, ctx.currentTime);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start();
+            osc.stop(ctx.currentTime + 0.12);
+          } catch (err) {
+            console.warn('Notification sound blocked:', err);
+          }
+        }
+      }
+    );
+
+    const ownBoardId = authUser?.assignedBoard ? normalizeBoard(authUser.assignedBoard).replace('Board ', '') : undefined;
+    const unsubCompanies = subscribeToCompanies((companySnapshot) => {
+      setCompanies(companySnapshot);
+    }, isAdminUser ? undefined : ownBoardId);
 
     const unsubLogs = subscribeToEmailLogs(driverOwnerUserId || activeUserId, (emailLogSnapshot) => {
       setEmailLogs(emailLogSnapshot);
@@ -409,10 +454,11 @@ const App: React.FC = () => {
 
     return () => {
       unsubDrivers();
+      unsubCompanies();
       unsubLogs();
       unsubReplies();
     };
-  }, [activeUserId, driverOwnerUserId, authUser?.email, authUser?.name, user?.accessToken, user?.email, user?.name]);
+  }, [activeUserId, driverOwnerUserId, authUser?.email, authUser?.name, authUser?.assignedBoard, isAdminUser, user?.accessToken, user?.email, user?.name]);
 
   useEffect(() => {
     if (authUser?.assignedBoard) {
@@ -807,11 +853,13 @@ const App: React.FC = () => {
     if (!activeUserId) return;
     try {
       const endpoint = apiUrl('/api/drivers/create');
+      const selectedCompany = companies.find((c) => c.name === data.company);
       const payload = {
         acting_user_id: activeUserId,
         name: data.name,
         email: data.email,
         company: data.company,
+        company_id: selectedCompany?.id || null,
         board: isAdminUser ? normalizeBoard(data.board) : normalizeBoard(authUser?.assignedBoard || data.board),
         deviceType: data.deviceType,
         appVersion: data.appVersion,
@@ -958,6 +1006,7 @@ const App: React.FC = () => {
             <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800">
               <DriverTable
                 drivers={drivers}
+                companies={companies}
                 filteredDrivers={filteredDrivers}
                 filters={{ searchQuery, eldFilter, dutyFilter, companyFilter, boardFilter }}
                 setFilters={{ setSearchQuery, setEldFilter, setDutyFilter, setCompanyFilter, setBoardFilter }}
@@ -1020,6 +1069,7 @@ const App: React.FC = () => {
         )}
       </main>
      </div>
+      <Toaster position="top-right" />
     </div>
   );
 };
