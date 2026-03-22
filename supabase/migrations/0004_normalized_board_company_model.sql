@@ -40,15 +40,24 @@ create unique index if not exists companies_normalized_name_board_id_uniq
   on public.companies(normalized_name, board_id);
 
 -- If previous schema had free-text "board", map it to board_id.
-update public.companies
-set board_id = case
-  when coalesce(board_id, '') <> '' then board_id
-  when upper(coalesce(board, '')) in ('A', 'BOARD A') then 'A'
-  when upper(coalesce(board, '')) in ('B', 'BOARD B') then 'B'
-  when upper(coalesce(board, '')) in ('C', 'BOARD C') then 'C'
-  else null
-end
-where board_id is null;
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema='public' and table_name='companies' and column_name='board'
+  ) then
+    update public.companies
+    set board_id = case
+      when coalesce(board_id, '') <> '' then board_id
+      when upper(coalesce(board, '')) in ('A', 'BOARD A') then 'A'
+      when upper(coalesce(board, '')) in ('B', 'BOARD B') then 'B'
+      when upper(coalesce(board, '')) in ('C', 'BOARD C') then 'C'
+      else null
+    end
+    where board_id is null;
+  end if;
+end $$;
 
 -- ---- 3) Normalize profiles
 alter table public.profiles
@@ -115,31 +124,75 @@ create index if not exists idx_drivers_new_company on public.drivers_new(company
 create index if not exists idx_drivers_new_created_by on public.drivers_new(created_by);
 
 -- ---- 5) Backfill companies from legacy drivers (if needed)
-insert into public.companies (name, board_id, created_by)
-select distinct
-  trim(d.company) as name,
-  case
-    when upper(coalesce(d.board, '')) in ('A', 'BOARD A') then 'A'
-    when upper(coalesce(d.board, '')) in ('B', 'BOARD B') then 'B'
-    when upper(coalesce(d.board, '')) in ('C', 'BOARD C') then 'C'
-    else null
-  end as board_id,
-  d.user_id as created_by
-from public.drivers d
-where coalesce(trim(d.company), '') <> ''
-  and not exists (
+do $$
+begin
+  -- Legacy schemas may still require companies.board (NOT NULL).
+  if exists (
     select 1
-    from public.companies c
-    where lower(trim(c.name)) = lower(trim(d.company))
-      and coalesce(c.board_id, '') = coalesce(
+    from information_schema.columns
+    where table_schema='public' and table_name='companies' and column_name='board'
+  ) then
+    execute $sql$
+      insert into public.companies (name, board_id, board, created_by)
+      select distinct
+        trim(d.company) as name,
         case
           when upper(coalesce(d.board, '')) in ('A', 'BOARD A') then 'A'
           when upper(coalesce(d.board, '')) in ('B', 'BOARD B') then 'B'
           when upper(coalesce(d.board, '')) in ('C', 'BOARD C') then 'C'
           else null
-        end, ''
-      )
-  );
+        end as board_id,
+        case
+          when upper(coalesce(d.board, '')) in ('A', 'BOARD A') then 'Board A'
+          when upper(coalesce(d.board, '')) in ('B', 'BOARD B') then 'Board B'
+          when upper(coalesce(d.board, '')) in ('C', 'BOARD C') then 'Board C'
+          else 'Board A'
+        end as board,
+        d.user_id as created_by
+      from public.drivers d
+      where coalesce(trim(d.company), '') <> ''
+        and not exists (
+          select 1
+          from public.companies c
+          where lower(trim(c.name)) = lower(trim(d.company))
+            and coalesce(c.board_id, '') = coalesce(
+              case
+                when upper(coalesce(d.board, '')) in ('A', 'BOARD A') then 'A'
+                when upper(coalesce(d.board, '')) in ('B', 'BOARD B') then 'B'
+                when upper(coalesce(d.board, '')) in ('C', 'BOARD C') then 'C'
+                else null
+              end, ''
+            )
+        )
+    $sql$;
+  else
+    insert into public.companies (name, board_id, created_by)
+    select distinct
+      trim(d.company) as name,
+      case
+        when upper(coalesce(d.board, '')) in ('A', 'BOARD A') then 'A'
+        when upper(coalesce(d.board, '')) in ('B', 'BOARD B') then 'B'
+        when upper(coalesce(d.board, '')) in ('C', 'BOARD C') then 'C'
+        else null
+      end as board_id,
+      d.user_id as created_by
+    from public.drivers d
+    where coalesce(trim(d.company), '') <> ''
+      and not exists (
+        select 1
+        from public.companies c
+        where lower(trim(c.name)) = lower(trim(d.company))
+          and coalesce(c.board_id, '') = coalesce(
+            case
+              when upper(coalesce(d.board, '')) in ('A', 'BOARD A') then 'A'
+              when upper(coalesce(d.board, '')) in ('B', 'BOARD B') then 'B'
+              when upper(coalesce(d.board, '')) in ('C', 'BOARD C') then 'C'
+              else null
+            end, ''
+          )
+      );
+  end if;
+end $$;
 
 -- ---- 6) Backfill drivers_new from legacy drivers
 insert into public.drivers_new (name, email, company_id, board_id, created_by, created_at, updated_at)
