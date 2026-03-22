@@ -898,6 +898,17 @@ const App: React.FC = () => {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error || `Request failed (${response.status})`);
+      if (data?.company?.id && data?.company?.name) {
+        const inserted = {
+          id: data.company.id as string,
+          name: data.company.name as string,
+          boardId: (data.company.board_id as string | null) ?? null
+        };
+        setCompanies((prev) => {
+          const withoutDup = prev.filter((c) => c.id !== inserted.id && c.name !== inserted.name);
+          return [...withoutDup, inserted].sort((a, b) => a.name.localeCompare(b.name));
+        });
+      }
       toast.success(data?.existed ? 'Company already exists.' : 'Company created.');
     } catch (error: any) {
       toast.error(error?.message || 'Failed to create company.');
