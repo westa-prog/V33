@@ -49,6 +49,19 @@ const readJsonStorage = <T,>(key: string, fallback: T): T => {
     return fallback;
   }
 };
+const normalizeBoard = (value?: string | null): string => {
+  const raw = (value || '').trim();
+  if (!raw) return '';
+  const upper = raw.toUpperCase();
+  if (upper === 'A' || upper === 'BOARD A') return 'Board A';
+  if (upper === 'B' || upper === 'BOARD B') return 'Board B';
+  if (upper === 'C' || upper === 'BOARD C') return 'Board C';
+  return raw;
+};
+const normalizeBoardList = (list?: (string | null | undefined)[]): string[] => {
+  if (!Array.isArray(list)) return [];
+  return list.map((item) => normalizeBoard(item || '')).filter(Boolean);
+};
 
 const buildFollowUpEmail = (driverName: string) => {
   const subject = `ELD Disconnected - Action Required`;
@@ -59,6 +72,29 @@ const buildFollowUpEmail = (driverName: string) => {
     `If you need help, reply to this message.\n\n` +
     `Thanks.`;
   return { subject, body };
+};
+const buildConnectionAutomationEmail = (driverName: string, dutyStatus?: DutyStatus | null) => {
+  if (dutyStatus === DutyStatus.DRIVING) {
+    return {
+      subject: `Urgent: ELD Disconnected While Driving`,
+      body:
+        `Hi ${driverName},\n\n` +
+        `Our system shows your ELD is DISCONNECTED while your status is DRIVING.\n` +
+        `Please safely pull over when possible and reconnect your ELD immediately.\n\n` +
+        `Reply to this message if you need support.\n\n` +
+        `Thanks.`
+    };
+  }
+
+  return {
+    subject: `Action Required: ELD Disconnected While On Duty`,
+    body:
+      `Hi ${driverName},\n\n` +
+      `Our system shows your ELD is DISCONNECTED while your status is ON DUTY.\n` +
+      `Please reconnect your ELD as soon as possible to stay compliant.\n\n` +
+      `Reply to this message if you need support.\n\n` +
+      `Thanks.`
+  };
 };
 import {
   ArrowLeftRight,
@@ -155,7 +191,7 @@ const App: React.FC = () => {
   const [boardFilter, setBoardFilter] = useState<string | 'ALL'>(() => {
     // On initial load, respect the stored authUser's assigned board if present.
     const parsed = readJsonStorage<AuthUser | null>('auth_user', null);
-    if (parsed?.assignedBoard) return parsed.assignedBoard;
+    if (parsed?.assignedBoard) return normalizeBoard(parsed.assignedBoard);
     return 'ALL';
   });
 
@@ -178,6 +214,7 @@ const App: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<string | undefined>();
   const [dbConnected, setDbConnected] = useState(false);
+  const autoSendingRef = useRef<Set<string>>(new Set());
   const activeUserId = authUser?.uid;
   const googleClientId = ((window as any).__GOOGLE_CLIENT_ID__ || '').trim();
   const isAdminUser = authUser?.role === 'admin' || authUser?.email === 'westa@algogroup.us';
@@ -192,9 +229,14 @@ const App: React.FC = () => {
   useEffect(() => {
     if (theme === 'dark') {
       document.documentElement.classList.add('dark');
+      document.body.classList.add('dark');
+      document.documentElement.style.colorScheme = 'dark';
     } else {
       document.documentElement.classList.remove('dark');
+      document.body.classList.remove('dark');
+      document.documentElement.style.colorScheme = 'light';
     }
+    document.body.setAttribute('data-theme', theme);
     localStorage.setItem('app-theme', theme);
   }, [theme]);
 
@@ -231,6 +273,17 @@ const App: React.FC = () => {
         uid: sessionUser.id,
         email: sessionUser.email || prev?.email || '',
         name: (sessionUser.user_metadata?.full_name as string) || prev?.name || sessionUser.email?.split('@')[0] || 'User',
+        role: (sessionUser.user_metadata?.role as string) || prev?.role,
+        adminId: (sessionUser.user_metadata?.admin_id as string) || prev?.adminId,
+        assignedBoards: Array.isArray(sessionUser.user_metadata?.assigned_boards)
+          ? normalizeBoardList(sessionUser.user_metadata.assigned_boards)
+          : (sessionUser.user_metadata?.assigned_board ? [normalizeBoard(sessionUser.user_metadata.assigned_board)] : normalizeBoardList(prev?.assignedBoards)),
+        assignedBoard: Array.isArray(sessionUser.user_metadata?.assigned_boards) && sessionUser.user_metadata.assigned_boards.length > 0
+          ? normalizeBoard(sessionUser.user_metadata.assigned_boards[0])
+          : normalizeBoard((sessionUser.user_metadata?.assigned_board as string) || prev?.assignedBoard),
+        assignedCompanies: Array.isArray(sessionUser.user_metadata?.assigned_companies)
+          ? sessionUser.user_metadata.assigned_companies
+          : (sessionUser.user_metadata?.assigned_company ? [sessionUser.user_metadata.assigned_company] : prev?.assignedCompanies),
         landingHtml: (sessionUser.user_metadata?.landing_html as string) || prev?.landingHtml,
         emailTemplate: (sessionUser.user_metadata?.email_template as string) || prev?.emailTemplate
       }));
@@ -250,6 +303,17 @@ const App: React.FC = () => {
         uid: sessionUser.id,
         email: sessionUser.email || prev?.email || '',
         name: (sessionUser.user_metadata?.full_name as string) || prev?.name || sessionUser.email?.split('@')[0] || 'User',
+        role: (sessionUser.user_metadata?.role as string) || prev?.role,
+        adminId: (sessionUser.user_metadata?.admin_id as string) || prev?.adminId,
+        assignedBoards: Array.isArray(sessionUser.user_metadata?.assigned_boards)
+          ? normalizeBoardList(sessionUser.user_metadata.assigned_boards)
+          : (sessionUser.user_metadata?.assigned_board ? [normalizeBoard(sessionUser.user_metadata.assigned_board)] : normalizeBoardList(prev?.assignedBoards)),
+        assignedBoard: Array.isArray(sessionUser.user_metadata?.assigned_boards) && sessionUser.user_metadata.assigned_boards.length > 0
+          ? normalizeBoard(sessionUser.user_metadata.assigned_boards[0])
+          : normalizeBoard((sessionUser.user_metadata?.assigned_board as string) || prev?.assignedBoard),
+        assignedCompanies: Array.isArray(sessionUser.user_metadata?.assigned_companies)
+          ? sessionUser.user_metadata.assigned_companies
+          : (sessionUser.user_metadata?.assigned_company ? [sessionUser.user_metadata.assigned_company] : prev?.assignedCompanies),
         landingHtml: (sessionUser.user_metadata?.landing_html as string) || prev?.landingHtml,
         emailTemplate: (sessionUser.user_metadata?.email_template as string) || prev?.emailTemplate
       }));
@@ -297,8 +361,8 @@ const App: React.FC = () => {
             ...prev,
             role: profile.role ?? prev.role,
             adminId: profile.admin_id ?? prev.adminId,
-            assignedBoards: profile.assigned_boards ?? [],
-            assignedBoard: profile.assigned_boards && profile.assigned_boards.length > 0 ? profile.assigned_boards[0] : undefined,
+            assignedBoards: normalizeBoardList(profile.assigned_boards ?? []),
+            assignedBoard: profile.assigned_boards && profile.assigned_boards.length > 0 ? normalizeBoard(profile.assigned_boards[0]) : undefined,
             assignedCompanies: profile.assigned_companies ?? [],
             name: profile.name || prev.name,
             email: profile.email || prev.email
@@ -320,11 +384,11 @@ const App: React.FC = () => {
       setLastSync(new Date().toISOString());
     });
 
-    const unsubLogs = subscribeToEmailLogs(activeUserId, (emailLogSnapshot) => {
+    const unsubLogs = subscribeToEmailLogs(driverOwnerUserId || activeUserId, (emailLogSnapshot) => {
       setEmailLogs(emailLogSnapshot);
     });
 
-    const unsubReplies = subscribeToDriverReplies(activeUserId, (driverReplySnapshot) => {
+    const unsubReplies = subscribeToDriverReplies(driverOwnerUserId || activeUserId, (driverReplySnapshot) => {
       setDriverReplies(driverReplySnapshot);
     });
 
@@ -337,7 +401,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (authUser?.assignedBoard) {
-      setBoardFilter(authUser.assignedBoard);
+      setBoardFilter(normalizeBoard(authUser.assignedBoard));
     }
   }, [authUser?.assignedBoard]);
 
@@ -412,11 +476,11 @@ const App: React.FC = () => {
       const matchesDuty = dutyFilter === 'ALL' || driver.dutyStatus === dutyFilter;
       const matchesCompany = companyFilter === 'ALL' || driver.company === companyFilter;
       
-      const allowedBoards = authUser?.assignedBoards || (authUser?.assignedBoard ? [authUser.assignedBoard] : []);
+      const allowedBoards = normalizeBoardList(authUser?.assignedBoards || (authUser?.assignedBoard ? [authUser.assignedBoard] : []));
       const allowedCompanies = authUser?.assignedCompanies || [];
       const matchesBoard = allowedBoards.length > 0
-        ? allowedBoards.includes(driver.board)
-        : (boardFilter === 'ALL' || driver.board === boardFilter);
+        ? allowedBoards.includes(normalizeBoard(driver.board))
+        : (boardFilter === 'ALL' || normalizeBoard(driver.board) === normalizeBoard(boardFilter));
       const matchesAssignedCompany = allowedCompanies.length > 0
         ? allowedCompanies.includes(driver.company)
         : true;
@@ -437,7 +501,7 @@ const App: React.FC = () => {
 
   const processAlertLogic = useCallback(async (driver: Driver) => {
     const isDisconnected = driver.eldStatus === ELDStatus.DISCONNECTED;
-    const isAtWork = [DutyStatus.DRIVING, DutyStatus.ON_DUTY, DutyStatus.OFF_DUTY, DutyStatus.SLEEPER].includes(driver.dutyStatus);
+    const isAtWork = [DutyStatus.DRIVING, DutyStatus.ON_DUTY].includes(driver.dutyStatus);
 
     if (isDisconnected && isAtWork && !driver.emailSent && !driver.hasPendingAlert) {
       if (driver.lastEmailTime) {
@@ -453,7 +517,10 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const handleManualSendEmail = async (driverId: string): Promise<{ sentAt: string }> => {
+  const handleManualSendEmail = async (
+    driverId: string,
+    options?: { silent?: boolean; automationType?: 'driving_disconnected' | 'onduty_disconnected' }
+  ): Promise<{ sentAt: string }> => {
     const driver = drivers.find(d => d.id === driverId);
     if (!driver) throw new Error('Driver not found');
 
@@ -466,7 +533,10 @@ const App: React.FC = () => {
       }
     }
 
-    const { subject, body } = buildFollowUpEmail(driver.name);
+    const isConnectionAutomation = options?.automationType === 'driving_disconnected' || options?.automationType === 'onduty_disconnected';
+    const { subject, body } = isConnectionAutomation
+      ? buildConnectionAutomationEmail(driver.name, driver.dutyStatus)
+      : buildFollowUpEmail(driver.name);
     const templatedBody = authUser?.emailTemplate
       ? authUser.emailTemplate
           .replace(/{{\s*driver_name\s*}}/gi, driver.name)
@@ -487,7 +557,9 @@ const App: React.FC = () => {
       if (!sentSuccess) throw new Error(res.error || "Gmail API failed to send message.");
     } else {
       console.log("Simulation mode: No real email sent.");
-      alert("Note: App is in SIMULATION MODE. No real email was sent. Connect your Google account or toggle Live Mode ON in the Database panel.");
+      if (!options?.silent) {
+        alert("Note: App is in SIMULATION MODE. No real email was sent. Connect your Google account or toggle Live Mode ON in the Database panel.");
+      }
     }
 
     const sentAt = new Date().toISOString();
@@ -515,9 +587,10 @@ const App: React.FC = () => {
     setEmailLogs(prev => [logEntry, ...prev]);
 
     // Persist to Supabase
-    if (activeUserId) {
-      await updateDriverInSupabase(activeUserId, driver.id, updatedDriver);
-      await addEmailLog(activeUserId, logEntry);
+    const logOwnerId = driverOwnerUserId || activeUserId;
+    if (activeUserId && logOwnerId) {
+      await updateDriverInSupabase(activeUserId, driver.id, updatedDriver, logOwnerId);
+      await addEmailLog(logOwnerId, logEntry);
     }
 
     return { sentAt };
@@ -527,10 +600,15 @@ const App: React.FC = () => {
     const driver = drivers.find(d => d.id === driverId);
     if (!driver) throw new Error('Driver not found');
 
-    const subject = `Profile Form Update Required - ${days} Days Pending`;
+    const subject = `Profile Form Stale Alert - ${days} Day Notice`;
+    const lastPfLabel = driver.lastPFUpdate
+      ? new Date(driver.lastPFUpdate).toLocaleString()
+      : 'No PF update date recorded';
     const body =
       `Hi ${driver.name},\n\n` +
-      `This is a reminder that your profile form has not been updated for ${days} days.\n` +
+      `This is your ${days}-day profile form reminder.\n` +
+      `Last Profile Form update: ${lastPfLabel}\n` +
+      `Your profile form has not been updated for ${days} days.\n` +
       `Please log in to the portal and update your profile form as soon as possible.\n\n` +
       `Thank you.`;
 
@@ -571,9 +649,10 @@ const App: React.FC = () => {
 
     setEmailLogs(prev => [logEntry, ...prev]);
 
-    if (activeUserId) {
-      await updateDriverInSupabase(activeUserId, driver.id, updatePayload);
-      await addEmailLog(activeUserId, logEntry);
+    const logOwnerId = driverOwnerUserId || activeUserId;
+    if (activeUserId && logOwnerId) {
+      await updateDriverInSupabase(activeUserId, driver.id, updatePayload, logOwnerId);
+      await addEmailLog(logOwnerId, logEntry);
     }
   };
 
@@ -584,8 +663,8 @@ const App: React.FC = () => {
     const updatePayload = { lastPFUpdate: dateStr };
     setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, ...updatePayload } : d));
 
-    if (activeUserId) {
-      await updateDriverInSupabase(activeUserId, driverId, updatePayload);
+    if (activeUserId && (driverOwnerUserId || activeUserId)) {
+      await updateDriverInSupabase(activeUserId, driverId, updatePayload, driverOwnerUserId || activeUserId);
     }
   };
 
@@ -618,8 +697,9 @@ const App: React.FC = () => {
 
     setEmailLogs(prev => [logEntry, ...prev]);
 
-    if (activeUserId) {
-      await addEmailLog(activeUserId, logEntry);
+    const logOwnerId = driverOwnerUserId || activeUserId;
+    if (activeUserId && logOwnerId) {
+      await addEmailLog(logOwnerId, logEntry);
     }
   };
 
@@ -653,6 +733,35 @@ const App: React.FC = () => {
     setLastSync(new Date().toISOString());
   }, [isLiveMode, drivers]);
 
+  useEffect(() => {
+    drivers.forEach((driver) => {
+      processAlertLogic(driver).catch((error) => console.error('Failed to process alert logic:', error));
+    });
+  }, [drivers, processAlertLogic]);
+
+  useEffect(() => {
+    if (!drivers.length) return;
+
+    const candidates = drivers.filter((driver) => {
+      const isDisconnected = driver.eldStatus === ELDStatus.DISCONNECTED;
+      const isEligibleDuty = driver.dutyStatus === DutyStatus.DRIVING || driver.dutyStatus === DutyStatus.ON_DUTY;
+      const isAlreadySending = autoSendingRef.current.has(driver.id);
+      return isDisconnected && isEligibleDuty && !!driver.hasPendingAlert && !isAlreadySending;
+    });
+
+    candidates.forEach(async (driver) => {
+      autoSendingRef.current.add(driver.id);
+      try {
+        const automationType = driver.dutyStatus === DutyStatus.DRIVING ? 'driving_disconnected' : 'onduty_disconnected';
+        await handleManualSendEmail(driver.id, { silent: true, automationType });
+      } catch (error) {
+        console.error(`Auto alert send failed for ${driver.name}:`, error);
+      } finally {
+        autoSendingRef.current.delete(driver.id);
+      }
+    });
+  }, [drivers, handleManualSendEmail]);
+
   const handleUpdateDriver = async (id: string, updates: Partial<Driver>) => {
     if (!isAdminUser) return;
     let updatedDriver: Driver | undefined;
@@ -678,7 +787,7 @@ const App: React.FC = () => {
         name: data.name,
         email: data.email,
         company: data.company,
-        board: isAdminUser ? data.board : (authUser?.assignedBoard || data.board),
+        board: isAdminUser ? normalizeBoard(data.board) : normalizeBoard(authUser?.assignedBoard || data.board),
         deviceType: data.deviceType,
         appVersion: data.appVersion,
         eldStatus: data.eldStatus,
@@ -739,13 +848,13 @@ const App: React.FC = () => {
     <Login onLogin={(u) => {
       setAuthUser(u);
       if (u.assignedBoard) {
-        setBoardFilter(u.assignedBoard);
+        setBoardFilter(normalizeBoard(u.assignedBoard));
       }
     }} />
   );
 
   return (
-    <div className="flex h-screen bg-slate-50 dark:bg-transparent overflow-hidden transition-colors relative">
+    <div className={`app-shell theme-${theme} flex h-screen bg-slate-50 dark:bg-transparent overflow-hidden transition-colors relative`}>
       <div className="hidden dark:block absolute inset-0 -z-20 pointer-events-none overflow-hidden">
         <HeroBackground />
       </div>
@@ -759,13 +868,13 @@ const App: React.FC = () => {
       )}
       
       <div className="flex-1 flex flex-col h-screen overflow-hidden relative">
-        <header className="flex-none flex items-center justify-between px-6 py-4 bg-white dark:bg-slate-900/60 backdrop-blur-md border-b border-slate-200 dark:border-slate-800/60 z-30 shadow-sm relative">
+        <header className="app-header flex-none flex items-center justify-between px-6 py-4 bg-white dark:bg-slate-900/60 backdrop-blur-md border-b border-slate-200 dark:border-slate-800/60 z-30 shadow-sm relative">
         <div className="flex items-center gap-6">
           <BrandLogo open={true} onToggle={() => {}} theme={theme} onToggleTheme={toggleTheme} />
         </div>
 
         <div className="flex items-center gap-4">
-           {!user ? (
+          {!user && (
             <button
               onClick={handleGoogleLogin}
               disabled={!googleClientId}
@@ -775,7 +884,8 @@ const App: React.FC = () => {
               <LogIn className="w-4 h-4 text-indigo-600" />
               {googleClientId ? 'Connect Google' : 'Google ID Missing'}
             </button>
-          ) : (
+          )}
+          {user && (
             <div className="flex items-center gap-4">
               <div className="hidden md:flex flex-col items-end pt-1">
                 <AnimatedText text={user.name} textClassName="text-sm tracking-tight text-slate-800 dark:text-white" underlineGradient="from-indigo-400 via-purple-400 to-pink-400" underlineHeight="h-0.5" underlineOffset="-bottom-1" />
@@ -791,11 +901,11 @@ const App: React.FC = () => {
                 </div>
               )}
               <div className="h-6 w-px bg-slate-200 dark:bg-slate-700 mx-1"></div>
-              <button onClick={handleLogout} className="p-2 text-slate-400 hover:text-red-500 rounded-lg transition-colors bg-slate-100 dark:bg-slate-800/50 hover:bg-red-50 dark:hover:bg-red-900/20" title="Sign Out">
-                <LogOut className="w-5 h-5" />
-              </button>
             </div>
           )}
+          <button onClick={handleLogout} className="p-2 text-slate-400 hover:text-red-500 rounded-lg transition-colors bg-slate-100 dark:bg-slate-800/50 hover:bg-red-50 dark:hover:bg-red-900/20" title="Sign Out">
+            <LogOut className="w-5 h-5" />
+          </button>
         </div>
       </header>
 
@@ -880,6 +990,7 @@ const App: React.FC = () => {
             theme={theme}
             setTheme={setTheme}
             emailLogs={emailLogs}
+            drivers={filteredDrivers}
           />
         )}
       </main>

@@ -1,5 +1,32 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
 
 body {
   font-family: 'Inter', sans-serif;
+  background: #f8fafc;
+  color: #0f172a;
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+html.dark body {
+  background: #020617;
+  color: #e2e8f0;
+}
+
+.app-shell.theme-light {
+  background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+}
+
+.app-shell.theme-dark {
+  background: radial-gradient(circle at 10% 10%, #1e293b 0%, #020617 55%, #020617 100%);
+}
+
+.theme-light .app-header {
+  background-color: rgba(255, 255, 255, 0.92) !important;
+  border-color: #e2e8f0 !important;
+}
+
+.theme-dark .app-header {
+  background-color: rgba(2, 6, 23, 0.82) !important;
+  border-color: #1e293b !important;
 }

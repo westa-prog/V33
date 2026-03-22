@@ -36,12 +36,21 @@ const normalizeList = (value: unknown): string[] => {
         .map((item) => typeof item === 'string' ? item.trim() : '')
         .filter(Boolean);
 };
+const normalizeBoardName = (value: unknown): string => {
+    const raw = typeof value === 'string' ? value.trim() : '';
+    if (!raw) return '';
+    const upper = raw.toUpperCase();
+    if (upper === 'A' || upper === 'BOARD A') return 'Board A';
+    if (upper === 'B' || upper === 'BOARD B') return 'Board B';
+    if (upper === 'C' || upper === 'BOARD C') return 'Board C';
+    return raw;
+};
 const pickAssignedBoards = (profile: any): string[] => {
     if (Array.isArray(profile?.assigned_boards)) {
-        return normalizeList(profile.assigned_boards);
+        return normalizeList(profile.assigned_boards).map(normalizeBoardName).filter(Boolean);
     }
     if (typeof profile?.assigned_board === 'string' && profile.assigned_board.trim()) {
-        return [profile.assigned_board.trim()];
+        return [normalizeBoardName(profile.assigned_board)];
     }
     return [];
 };
@@ -64,7 +73,7 @@ const readUserMetadata = (user: any) => {
     return {
         role: typeof meta.role === 'string' ? meta.role : undefined,
         admin_id: typeof meta.admin_id === 'string' ? meta.admin_id : undefined,
-        assigned_boards: pickMetadataList(meta.assigned_boards || meta.assigned_board),
+        assigned_boards: pickMetadataList(meta.assigned_boards || meta.assigned_board).map(normalizeBoardName).filter(Boolean),
         assigned_companies: pickMetadataList(meta.assigned_companies || meta.assigned_company)
     };
 };
@@ -105,7 +114,7 @@ app.post('/api/admin/create-user', async (req, res) => {
         const normalizedUsername = String(username).trim();
         const normalizedPassword = String(password);
         const normalizedAdminEmail = String(admin_email).trim().toLowerCase();
-        const normalizedBoards = normalizeList(assigned_boards);
+        const normalizedBoards = normalizeList(assigned_boards).map(normalizeBoardName).filter(Boolean);
         const normalizedCompanies = normalizeList(assigned_companies);
 
         if (normalizedUsername.length < 3) {
@@ -306,7 +315,7 @@ app.patch('/api/admin/users/:userId', async (req, res) => {
             return;
         }
 
-        const normalizedBoards = normalizeList(assigned_boards);
+        const normalizedBoards = normalizeList(assigned_boards).map(normalizeBoardName).filter(Boolean);
         const normalizedCompanies = normalizeList(assigned_companies);
         if (normalizedBoards.some((board) => !ALLOWED_BOARDS.has(board))) {
             res.status(400).json({ error: 'Only Board A, Board B, or Board C are allowed.' });
@@ -416,7 +425,7 @@ app.post('/api/admin/repair-users', async (req, res) => {
     try {
         const { admin_id, default_boards } = req.body || {};
         const normalizedAdminId = String(admin_id || '').trim();
-        const normalizedBoards = normalizeList(default_boards);
+        const normalizedBoards = normalizeList(default_boards).map(normalizeBoardName).filter(Boolean);
 
         if (!isUuid(normalizedAdminId)) {
             res.status(400).json({ error: 'A valid admin_id is required.' });
@@ -540,7 +549,7 @@ app.post('/api/drivers/create', async (req, res) => {
         const normalizedName = String(name).trim();
         const normalizedEmail = String(email).trim().toLowerCase();
         const normalizedCompany = String(company).trim();
-        const normalizedBoardInput = String(board || '').trim();
+        const normalizedBoardInput = normalizeBoardName(String(board || '').trim());
 
         if (!isUuid(normalizedActingUserId)) {
             res.status(400).json({ error: 'A valid acting_user_id is required.' });
@@ -613,7 +622,7 @@ app.post('/api/drivers/create', async (req, res) => {
                 res.status(403).json({ error: 'Employee has no assigned boards.' });
                 return;
             }
-            effectiveBoard = assignedBoards[0];
+            effectiveBoard = normalizeBoardName(assignedBoards[0]) || 'Board A';
             if (assignedCompanies.length > 0 && !assignedCompanies.includes(normalizedCompany)) {
                 res.status(403).json({ error: 'Employee cannot create drivers outside assigned companies.' });
                 return;

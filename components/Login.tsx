@@ -49,6 +49,17 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
           uid: signedInUser.id,
           email: signedInUser.email || email,
           name: (signedInUser.user_metadata?.full_name as string) || name || email.split('@')[0],
+          role: (signedInUser.user_metadata?.role as string) || undefined,
+          adminId: (signedInUser.user_metadata?.admin_id as string) || undefined,
+          assignedBoards: Array.isArray(signedInUser.user_metadata?.assigned_boards)
+            ? signedInUser.user_metadata.assigned_boards
+            : (signedInUser.user_metadata?.assigned_board ? [signedInUser.user_metadata.assigned_board] : []),
+          assignedBoard: Array.isArray(signedInUser.user_metadata?.assigned_boards) && signedInUser.user_metadata.assigned_boards.length > 0
+            ? signedInUser.user_metadata.assigned_boards[0]
+            : (signedInUser.user_metadata?.assigned_board as string) || undefined,
+          assignedCompanies: Array.isArray(signedInUser.user_metadata?.assigned_companies)
+            ? signedInUser.user_metadata.assigned_companies
+            : (signedInUser.user_metadata?.assigned_company ? [signedInUser.user_metadata.assigned_company] : []),
           landingHtml: (signedInUser.user_metadata?.landing_html as string) || '',
           emailTemplate: (signedInUser.user_metadata?.email_template as string) || ''
         });
@@ -65,6 +76,17 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
         uid: signedInUser.id,
         email: signedInUser.email || email,
         name: (signedInUser.user_metadata?.full_name as string) || email.split('@')[0],
+        role: (signedInUser.user_metadata?.role as string) || undefined,
+        adminId: (signedInUser.user_metadata?.admin_id as string) || undefined,
+        assignedBoards: Array.isArray(signedInUser.user_metadata?.assigned_boards)
+          ? signedInUser.user_metadata.assigned_boards
+          : (signedInUser.user_metadata?.assigned_board ? [signedInUser.user_metadata.assigned_board] : []),
+        assignedBoard: Array.isArray(signedInUser.user_metadata?.assigned_boards) && signedInUser.user_metadata.assigned_boards.length > 0
+          ? signedInUser.user_metadata.assigned_boards[0]
+          : (signedInUser.user_metadata?.assigned_board as string) || undefined,
+        assignedCompanies: Array.isArray(signedInUser.user_metadata?.assigned_companies)
+          ? signedInUser.user_metadata.assigned_companies
+          : (signedInUser.user_metadata?.assigned_company ? [signedInUser.user_metadata.assigned_company] : []),
         landingHtml: (signedInUser.user_metadata?.landing_html as string) || '',
         emailTemplate: (signedInUser.user_metadata?.email_template as string) || ''
       });
