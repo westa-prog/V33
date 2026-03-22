@@ -5,7 +5,7 @@ import { Mail, Monitor, RefreshCw, Server, Smartphone, Tablet } from 'lucide-rea
 import axios from 'axios';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Map, MapControls } from './ui/map';
-import { ParticleTextEffect } from './ui/particle-text-effect';
+import { HorizonHeroSection } from './ui/horizon-hero-section';
 
 interface DashboardProps {
     drivers: Driver[];
@@ -103,43 +103,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, em
         <div className="space-y-6 animate-in fade-in zoom-in-95 duration-200">
             {assignedBoard && employeeName && (
                 <section className="space-y-6">
-                    <ParticleTextEffect
-                        words={[employeeName.toUpperCase(), assignedBoard.toUpperCase(), 'WELCOME']}
-                        subtitle={`Welcome back, ${employeeName}. Stay focused, keep ${assignedBoard} moving, and scroll to manage your board.`}
+                    <HorizonHeroSection
+                        title={employeeName}
+                        boardName={assignedBoard}
+                        subtitleLines={[
+                            `Welcome back, ${employeeName}. Your work is shaping ${assignedBoard} right now.`,
+                            `Stay focused, keep updates clean, and scroll forward into the live tools for your assigned board.`
+                        ]}
+                        stats={[
+                            { label: 'Assigned Board', value: assignedBoard },
+                            { label: 'Drivers', value: filteredDrivers.length },
+                            { label: 'Connected', value: activeDrivers, tone: 'success' },
+                            { label: 'Attention Needed', value: boardViolations, tone: 'warning' }
+                        ]}
+                        appraisals={motivationalCopy}
                     />
-
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                        <div className="bg-white/90 dark:bg-slate-900/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
-                            <p className="text-xs font-black uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Assigned Board</p>
-                            <p className="mt-3 text-3xl font-black text-slate-900 dark:text-white">{assignedBoard}</p>
-                        </div>
-                        <div className="bg-white/90 dark:bg-slate-900/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
-                            <p className="text-xs font-black uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Drivers</p>
-                            <p className="mt-3 text-3xl font-black text-slate-900 dark:text-white">{filteredDrivers.length}</p>
-                        </div>
-                        <div className="bg-white/90 dark:bg-slate-900/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
-                            <p className="text-xs font-black uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Connected</p>
-                            <p className="mt-3 text-3xl font-black text-emerald-600 dark:text-emerald-400">{activeDrivers}</p>
-                        </div>
-                        <div className="bg-white/90 dark:bg-slate-900/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
-                            <p className="text-xs font-black uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Attention Needed</p>
-                            <p className="mt-3 text-3xl font-black text-amber-600 dark:text-amber-400">{boardViolations}</p>
-                        </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        {motivationalCopy.map((line) => (
-                            <div key={line} className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white/85 dark:bg-slate-900/70 p-5 shadow-sm">
-                                <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{line}</p>
-                            </div>
-                        ))}
-                    </div>
-
-                    <div className="flex items-center justify-center">
-                        <div className="rounded-full border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/70 px-4 py-2 text-xs font-black uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
-                            Scroll down to continue into your dashboard
-                        </div>
-                    </div>
                 </section>
             )}
 
