@@ -71,6 +71,13 @@ export interface GoogleUser {
   expiry: number;
 }
 
+export interface EmailTemplateMap {
+  connection_driving?: string;
+  connection_onduty?: string;
+  pf_3_day?: string;
+  pf_5_day?: string;
+}
+
 export interface AuthUser {
   email: string;
   name: string;
@@ -83,6 +90,7 @@ export interface AuthUser {
   assignedCompanies?: string[];
   landingHtml?: string;
   emailTemplate?: string;
+  emailTemplates?: EmailTemplateMap;
 }
 
 export interface SheetConfig {

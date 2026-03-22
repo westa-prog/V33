@@ -257,7 +257,8 @@ app.get('/api/admin/users', async (req, res) => {
                     assigned_boards: pickAssignedBoards(row).length > 0 ? pickAssignedBoards(row) : meta.assigned_boards,
                     assigned_companies: pickAssignedCompanies(row).length > 0 ? pickAssignedCompanies(row) : meta.assigned_companies,
                     landing_html: userData?.user?.user_metadata?.landing_html || '',
-                    email_template: userData?.user?.user_metadata?.email_template || ''
+                    email_template: userData?.user?.user_metadata?.email_template || '',
+                    email_templates: userData?.user?.user_metadata?.email_templates || {}
                 });
             }
             res.json({ success: true, users: mapped });
@@ -290,7 +291,8 @@ app.get('/api/admin/users', async (req, res) => {
                         assigned_boards: meta.assigned_boards,
                         assigned_companies: meta.assigned_companies,
                         landing_html: u.user_metadata?.landing_html || '',
-                        email_template: u.user_metadata?.email_template || ''
+                        email_template: u.user_metadata?.email_template || '',
+                        email_templates: u.user_metadata?.email_templates || {}
                     });
                 }
             }
@@ -307,7 +309,7 @@ app.get('/api/admin/users', async (req, res) => {
 app.patch('/api/admin/users/:userId', async (req, res) => {
     try {
         const userId = String(req.params.userId || '').trim();
-        const { admin_id, assigned_boards, assigned_companies, password, landing_html, email_template } = req.body || {};
+        const { admin_id, assigned_boards, assigned_companies, password, landing_html, email_template, email_templates } = req.body || {};
         const normalizedAdminId = String(admin_id || '').trim();
 
         if (!isUuid(userId) || !isUuid(normalizedAdminId)) {
@@ -336,6 +338,11 @@ app.patch('/api/admin/users/:userId', async (req, res) => {
         let targetIsOwnedByAdmin = false;
         if (!targetError && targetProfile) {
             targetIsOwnedByAdmin = targetProfile.admin_id === normalizedAdminId;
+            if (!targetIsOwnedByAdmin) {
+                const { data: userData } = await supabase.auth.admin.getUserById(userId);
+                const meta = readUserMetadata(userData?.user);
+                targetIsOwnedByAdmin = meta.admin_id === normalizedAdminId;
+            }
         } else if (/admin_id/i.test(String(targetError?.message || ''))) {
             const { data: userData, error: userErr } = await supabase.auth.admin.getUserById(userId);
             if (userErr || !userData?.user) {
@@ -388,6 +395,9 @@ app.patch('/api/admin/users/:userId', async (req, res) => {
             return;
         }
         const currentMeta = existingUser.user.user_metadata || {};
+        const safeEmailTemplates = (email_templates && typeof email_templates === 'object')
+            ? email_templates
+            : (currentMeta.email_templates || {});
         const { error: metadataUpdateError } = await supabase.auth.admin.updateUserById(userId, {
             user_metadata: {
                 ...currentMeta,
@@ -396,7 +406,8 @@ app.patch('/api/admin/users/:userId', async (req, res) => {
                 assigned_boards: normalizedBoards,
                 assigned_companies: normalizedCompanies,
                 landing_html: typeof landing_html === 'string' ? landing_html : (currentMeta.landing_html || ''),
-                email_template: typeof email_template === 'string' ? email_template : (currentMeta.email_template || '')
+                email_template: typeof email_template === 'string' ? email_template : (currentMeta.email_template || ''),
+                email_templates: safeEmailTemplates
             }
         });
         if (metadataUpdateError) {

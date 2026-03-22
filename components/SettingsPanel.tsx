@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { AuthUser, Driver, DutyStatus, ELDStatus, EmailLogEntry } from '../types';
+import { AuthUser, Driver, DutyStatus, ELDStatus, EmailLogEntry, EmailTemplateMap } from '../types';
 
 interface SettingsPanelProps {
   currentUser: AuthUser;
@@ -20,6 +20,7 @@ type EmployeeRecord = {
   assigned_boards?: string[];
   landing_html?: string;
   email_template?: string;
+  email_templates?: EmailTemplateMap;
 };
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({ currentUser, isAdmin, theme, setTheme, emailLogs, drivers }) => {
@@ -31,9 +32,21 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ currentUser, isAdm
   const [loading, setLoading] = useState(false);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
   const [landingHtml, setLandingHtml] = useState('');
-  const [emailTemplate, setEmailTemplate] = useState('');
+  const [emailTemplatesDraft, setEmailTemplatesDraft] = useState<EmailTemplateMap>({
+    connection_driving: '',
+    connection_onduty: '',
+    pf_3_day: '',
+    pf_5_day: ''
+  });
+  const [activeTemplateKey, setActiveTemplateKey] = useState<keyof EmailTemplateMap>('connection_driving');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string>('');
+  const templateOptions: Array<{ key: keyof EmailTemplateMap; label: string }> = [
+    { key: 'connection_driving', label: 'Connection: Driving + Disconnected' },
+    { key: 'connection_onduty', label: 'Connection: On Duty + Disconnected' },
+    { key: 'pf_3_day', label: 'Profile Form: 3-Day Stale' },
+    { key: 'pf_5_day', label: 'Profile Form: 5-Day Stale' }
+  ];
 
   const selectedEmployee = useMemo(
     () => employees.find((u) => u.id === selectedEmployeeId),
@@ -321,8 +334,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ currentUser, isAdm
 
   useEffect(() => {
     setLandingHtml(selectedEmployee?.landing_html || '');
-    setEmailTemplate(selectedEmployee?.email_template || '');
-  }, [selectedEmployeeId, selectedEmployee?.landing_html, selectedEmployee?.email_template]);
+    const metaTemplates = selectedEmployee?.email_templates || {};
+    setEmailTemplatesDraft({
+      connection_driving: metaTemplates.connection_driving || '',
+      connection_onduty: metaTemplates.connection_onduty || selectedEmployee?.email_template || '',
+      pf_3_day: metaTemplates.pf_3_day || '',
+      pf_5_day: metaTemplates.pf_5_day || ''
+    });
+  }, [selectedEmployeeId, selectedEmployee?.landing_html, selectedEmployee?.email_template, selectedEmployee?.email_templates]);
 
   const savePersonalization = async () => {
     if (!isAdmin || !currentUser.uid || !selectedEmployeeId) return;
@@ -337,7 +356,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ currentUser, isAdm
           assigned_boards: selectedEmployee?.assigned_boards || [],
           assigned_companies: [],
           landing_html: landingHtml,
-          email_template: emailTemplate
+          email_template: emailTemplatesDraft.connection_onduty || selectedEmployee?.email_template || '',
+          email_templates: emailTemplatesDraft
         })
       });
       const data = await res.json();
@@ -420,14 +440,30 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ currentUser, isAdm
                 </div>
 
                 <div>
-                  <label className="text-xs font-semibold text-slate-500">Email Template</label>
+                  <label className="text-xs font-semibold text-slate-500">Email Template Menu</label>
+                  <select
+                    value={activeTemplateKey}
+                    onChange={(e) => setActiveTemplateKey(e.target.value as keyof EmailTemplateMap)}
+                    className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm"
+                  >
+                    {templateOptions.map((opt) => (
+                      <option key={opt.key} value={opt.key}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-500">Template Body</label>
                   <textarea
-                    value={emailTemplate}
-                    onChange={(e) => setEmailTemplate(e.target.value)}
+                    value={emailTemplatesDraft[activeTemplateKey] || ''}
+                    onChange={(e) => setEmailTemplatesDraft((prev) => ({ ...prev, [activeTemplateKey]: e.target.value }))}
                     rows={6}
                     className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm"
-                    placeholder="Hi {{driver_name}}, ... "
+                    placeholder={`Hi {{driver_name}}, ...`}
                   />
+                  <p className="mt-2 text-xs text-slate-500">
+                    Variables: {'{{driver_name}}'}, {'{{driver_email}}'}, {'{{company}}'}, {'{{board}}'}, {'{{stale_days}}'}, {'{{last_pf_update}}'}
+                  </p>
                 </div>
 
                 <button

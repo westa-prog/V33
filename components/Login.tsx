@@ -61,7 +61,10 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
             ? signedInUser.user_metadata.assigned_companies
             : (signedInUser.user_metadata?.assigned_company ? [signedInUser.user_metadata.assigned_company] : []),
           landingHtml: (signedInUser.user_metadata?.landing_html as string) || '',
-          emailTemplate: (signedInUser.user_metadata?.email_template as string) || ''
+          emailTemplate: (signedInUser.user_metadata?.email_template as string) || '',
+          emailTemplates: typeof signedInUser.user_metadata?.email_templates === 'object' && signedInUser.user_metadata?.email_templates
+            ? signedInUser.user_metadata.email_templates
+            : undefined
         });
         return;
       }
@@ -88,7 +91,10 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
           ? signedInUser.user_metadata.assigned_companies
           : (signedInUser.user_metadata?.assigned_company ? [signedInUser.user_metadata.assigned_company] : []),
         landingHtml: (signedInUser.user_metadata?.landing_html as string) || '',
-        emailTemplate: (signedInUser.user_metadata?.email_template as string) || ''
+        emailTemplate: (signedInUser.user_metadata?.email_template as string) || '',
+        emailTemplates: typeof signedInUser.user_metadata?.email_templates === 'object' && signedInUser.user_metadata?.email_templates
+          ? signedInUser.user_metadata.email_templates
+          : undefined
       });
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Authentication failed.');

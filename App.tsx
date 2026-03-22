@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Driver, DutyStatus, ELDStatus, FollowUpStatus, EmailLogEntry, GoogleUser, AuthUser, DriverReply } from './types';
+import { Driver, DutyStatus, ELDStatus, FollowUpStatus, EmailLogEntry, GoogleUser, AuthUser, DriverReply, EmailTemplateMap } from './types';
 import { INITIAL_DRIVERS } from './constants';
 import { DriverTable } from './components/DriverTable';
 import { StatsCard } from './components/StatsCard';
@@ -61,6 +61,15 @@ const normalizeBoard = (value?: string | null): string => {
 const normalizeBoardList = (list?: (string | null | undefined)[]): string[] => {
   if (!Array.isArray(list)) return [];
   return list.map((item) => normalizeBoard(item || '')).filter(Boolean);
+};
+const renderEmailTemplate = (template: string, driver: Driver, extras?: { staleDays?: number; lastPfUpdateLabel?: string }) => {
+  return template
+    .replace(/{{\s*driver_name\s*}}/gi, driver.name || '')
+    .replace(/{{\s*driver_email\s*}}/gi, driver.email || '')
+    .replace(/{{\s*company\s*}}/gi, driver.company || '')
+    .replace(/{{\s*board\s*}}/gi, driver.board || '')
+    .replace(/{{\s*stale_days\s*}}/gi, String(extras?.staleDays ?? ''))
+    .replace(/{{\s*last_pf_update\s*}}/gi, extras?.lastPfUpdateLabel || '');
 };
 
 const buildFollowUpEmail = (driverName: string) => {
@@ -285,7 +294,10 @@ const App: React.FC = () => {
           ? sessionUser.user_metadata.assigned_companies
           : (sessionUser.user_metadata?.assigned_company ? [sessionUser.user_metadata.assigned_company] : prev?.assignedCompanies),
         landingHtml: (sessionUser.user_metadata?.landing_html as string) || prev?.landingHtml,
-        emailTemplate: (sessionUser.user_metadata?.email_template as string) || prev?.emailTemplate
+        emailTemplate: (sessionUser.user_metadata?.email_template as string) || prev?.emailTemplate,
+        emailTemplates: typeof sessionUser.user_metadata?.email_templates === 'object' && sessionUser.user_metadata?.email_templates
+          ? (sessionUser.user_metadata.email_templates as EmailTemplateMap)
+          : prev?.emailTemplates
       }));
     };
 
@@ -315,7 +327,10 @@ const App: React.FC = () => {
           ? sessionUser.user_metadata.assigned_companies
           : (sessionUser.user_metadata?.assigned_company ? [sessionUser.user_metadata.assigned_company] : prev?.assignedCompanies),
         landingHtml: (sessionUser.user_metadata?.landing_html as string) || prev?.landingHtml,
-        emailTemplate: (sessionUser.user_metadata?.email_template as string) || prev?.emailTemplate
+        emailTemplate: (sessionUser.user_metadata?.email_template as string) || prev?.emailTemplate,
+        emailTemplates: typeof sessionUser.user_metadata?.email_templates === 'object' && sessionUser.user_metadata?.email_templates
+          ? (sessionUser.user_metadata.email_templates as EmailTemplateMap)
+          : prev?.emailTemplates
       }));
     });
 
@@ -537,12 +552,13 @@ const App: React.FC = () => {
     const { subject, body } = isConnectionAutomation
       ? buildConnectionAutomationEmail(driver.name, driver.dutyStatus)
       : buildFollowUpEmail(driver.name);
-    const templatedBody = authUser?.emailTemplate
-      ? authUser.emailTemplate
-          .replace(/{{\s*driver_name\s*}}/gi, driver.name)
-          .replace(/{{\s*driver_email\s*}}/gi, driver.email || '')
-          .replace(/{{\s*company\s*}}/gi, driver.company || '')
-          .replace(/{{\s*board\s*}}/gi, driver.board || '')
+    const selectedTemplate = options?.automationType === 'driving_disconnected'
+      ? authUser?.emailTemplates?.connection_driving
+      : options?.automationType === 'onduty_disconnected'
+        ? authUser?.emailTemplates?.connection_onduty
+        : authUser?.emailTemplate;
+    const templatedBody = selectedTemplate
+      ? renderEmailTemplate(selectedTemplate, driver)
       : body;
     let sentSuccess = true;
     let sentVia: 'Simulation' | 'Gmail API' = 'Simulation';
@@ -604,6 +620,9 @@ const App: React.FC = () => {
     const lastPfLabel = driver.lastPFUpdate
       ? new Date(driver.lastPFUpdate).toLocaleString()
       : 'No PF update date recorded';
+    const staleDays = driver.lastPFUpdate
+      ? Math.floor((Date.now() - new Date(driver.lastPFUpdate).getTime()) / (1000 * 60 * 60 * 24))
+      : days;
     const body =
       `Hi ${driver.name},\n\n` +
       `This is your ${days}-day profile form reminder.\n` +
@@ -611,12 +630,18 @@ const App: React.FC = () => {
       `Your profile form has not been updated for ${days} days.\n` +
       `Please log in to the portal and update your profile form as soon as possible.\n\n` +
       `Thank you.`;
+    const selectedTemplate = days === 3
+      ? authUser?.emailTemplates?.pf_3_day
+      : authUser?.emailTemplates?.pf_5_day;
+    const finalBody = selectedTemplate
+      ? renderEmailTemplate(selectedTemplate, driver, { staleDays, lastPfUpdateLabel: lastPfLabel })
+      : body;
 
     let sentSuccess = true;
     let sentVia: 'Simulation' | 'Gmail API' = 'Simulation';
 
     if (isLiveMode && user?.accessToken && user.accessToken !== 'demo_token') {
-      const res = await sendGmailMessage(user.accessToken, driver.email, subject, body);
+      const res = await sendGmailMessage(user.accessToken, driver.email, subject, finalBody);
       sentSuccess = res.ok;
       sentVia = 'Gmail API';
       if (!sentSuccess) throw new Error(res.error || "Gmail API failed to send message.");
@@ -643,7 +668,7 @@ const App: React.FC = () => {
       driverName: driver.name,
       timestamp: sentAt,
       statusAtTime: driver.dutyStatus || DutyStatus.NOT_SET,
-      content: body,
+      content: finalBody,
       sentVia
     };
 
