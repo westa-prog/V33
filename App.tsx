@@ -380,7 +380,9 @@ const App: React.FC = () => {
   }, []);
 
   const applyDriverSnapshot = useCallback((snapshot: Driver[]) => {
-    setDrivers((prev) => mergeDriverSnapshots(prev, snapshot, pendingDriverMutationsRef.current));
+    const pendingMutations = pendingDriverMutationsRef.current;
+    const hasPendingMutations = Object.keys(pendingMutations).length > 0;
+    setDrivers((prev) => hasPendingMutations ? mergeDriverSnapshots(prev, snapshot, pendingMutations) : snapshot);
     setLastSync(new Date().toISOString());
   }, []);
 
@@ -1007,7 +1009,10 @@ const App: React.FC = () => {
     // Persist to Supabase
     const logOwnerId = driverOwnerUserId || activeUserId;
     if (activeUserId && logOwnerId) {
-      await persistDriverUpdate(driver.id, updatedDriver, updatedDriver);
+      const persistedDriver = await persistDriverUpdate(driver.id, updatedDriver, updatedDriver);
+      if (persistedDriver) {
+        setDrivers(prev => prev.map(d => d.id === driver.id ? { ...d, ...persistedDriver } : d));
+      }
       await addEmailLog(logOwnerId, logEntry);
     }
 
@@ -1074,7 +1079,10 @@ const App: React.FC = () => {
 
     const logOwnerId = driverOwnerUserId || activeUserId;
     if (activeUserId && logOwnerId) {
-      await persistDriverUpdate(driver.id, updatePayload, updatedDriver);
+      const persistedDriver = await persistDriverUpdate(driver.id, updatePayload, updatedDriver);
+      if (persistedDriver) {
+        setDrivers(prev => prev.map(d => d.id === driver.id ? { ...d, ...persistedDriver } : d));
+      }
       await addEmailLog(logOwnerId, logEntry);
     }
   };
@@ -1087,7 +1095,10 @@ const App: React.FC = () => {
     setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, ...updatePayload } : d));
 
     if (activeUserId && (driverOwnerUserId || activeUserId)) {
-      await persistDriverUpdate(driverId, updatePayload, driver);
+      const persistedDriver = await persistDriverUpdate(driverId, updatePayload, driver);
+      if (persistedDriver) {
+        setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, ...persistedDriver } : d));
+      }
     }
   };
 
@@ -1175,8 +1186,6 @@ const App: React.FC = () => {
     let previousDriver: Driver | undefined;
     let updatedDriver: Driver | undefined;
     let persistencePayload: Partial<Driver> | undefined;
-    const optimisticUpdatedAt = new Date().toISOString();
-
     setDrivers(prev => {
       previousDriver = prev.find(d => d.id === id);
       const newDrivers = prev.map(d => {
@@ -1184,7 +1193,7 @@ const App: React.FC = () => {
         const merged = { ...d, ...updates };
         const derived = deriveDriverAlertState(merged);
         persistencePayload = { ...updates, ...derived };
-        return { ...merged, ...derived, updatedAt: optimisticUpdatedAt };
+        return { ...merged, ...derived };
       });
       updatedDriver = newDrivers.find(d => d.id === id);
       return newDrivers;
@@ -1202,7 +1211,7 @@ const App: React.FC = () => {
         }
 
         if (persistedDriver && isLatestMutation) {
-          setDrivers(prev => prev.map(d => d.id === id ? mergeDriverRecord(d, persistedDriver) : d));
+          setDrivers(prev => prev.map(d => d.id === id ? { ...d, ...persistedDriver } : d));
         }
       } catch (error: any) {
         const isLatestMutation = pendingDriverMutationsRef.current[id] === mutationSeq;
