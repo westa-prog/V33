@@ -1068,7 +1068,7 @@ const App: React.FC = () => {
           )}
         </header>
 
-        {activeTab === 'Dashboard' && <Dashboard drivers={filteredDrivers} assignedBoard={isAdminUser ? undefined : authUser?.assignedBoard} landingHtml={authUser?.landingHtml} />}
+        {activeTab === 'Dashboard' && <Dashboard drivers={filteredDrivers} assignedBoard={isAdminUser ? undefined : authUser?.assignedBoard} landingHtml={authUser?.landingHtml} employeeName={isAdminUser ? undefined : authUser?.name} />}
 
         {activeTab === 'Connection' && (
           <div className="space-y-8">

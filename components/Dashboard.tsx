@@ -5,14 +5,16 @@ import { Mail, Monitor, RefreshCw, Server, Smartphone, Tablet } from 'lucide-rea
 import axios from 'axios';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Map, MapControls } from './ui/map';
+import { ParticleTextEffect } from './ui/particle-text-effect';
 
 interface DashboardProps {
     drivers: Driver[];
     assignedBoard?: string;
     landingHtml?: string;
+    employeeName?: string;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, landingHtml }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, landingHtml, employeeName }) => {
     if (landingHtml && landingHtml.trim()) {
         return (
             <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
@@ -22,6 +24,33 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, la
                     className="w-full min-h-[80vh] bg-white"
                     sandbox="allow-same-origin allow-popups allow-forms allow-scripts"
                 />
+            </div>
+        );
+    }
+    if (assignedBoard && employeeName) {
+        return (
+            <div className="space-y-6">
+                <ParticleTextEffect
+                    words={[employeeName.toUpperCase(), assignedBoard.toUpperCase()]}
+                    subtitle={`Welcome back, ${employeeName}. You are working inside ${assignedBoard}.`}
+                />
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="bg-white/90 dark:bg-slate-900/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
+                        <p className="text-xs font-black uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Assigned Board</p>
+                        <p className="mt-3 text-3xl font-black text-slate-900 dark:text-white">{assignedBoard}</p>
+                    </div>
+                    <div className="bg-white/90 dark:bg-slate-900/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
+                        <p className="text-xs font-black uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Visible Drivers</p>
+                        <p className="mt-3 text-3xl font-black text-slate-900 dark:text-white">{drivers.length}</p>
+                    </div>
+                    <div className="bg-white/90 dark:bg-slate-900/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
+                        <p className="text-xs font-black uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Connected</p>
+                        <p className="mt-3 text-3xl font-black text-emerald-600 dark:text-emerald-400">
+                            {drivers.filter((d) => d.eldStatus === ELDStatus.CONNECTED).length}
+                        </p>
+                    </div>
+                </div>
             </div>
         );
     }
