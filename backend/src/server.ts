@@ -1011,6 +1011,174 @@ app.post('/api/companies/create', async (req, res) => {
     }
 });
 
+app.patch('/api/companies/:companyId', async (req, res) => {
+    try {
+        const companyId = String(req.params.companyId || '').trim();
+        const actingUserId = String(req.body?.acting_user_id || '').trim();
+        const normalizedName = String(req.body?.name || '').trim();
+        const requestedBoard = normalizeBoardName(String(req.body?.board || '').trim());
+
+        if (!isUuid(companyId) || !isUuid(actingUserId)) {
+            res.status(400).json({ error: 'Valid companyId and acting_user_id are required.' });
+            return;
+        }
+        if (normalizedName.length < 2) {
+            res.status(400).json({ error: 'Company name must be at least 2 characters.' });
+            return;
+        }
+
+        const supabase = getDb();
+        const { data: profile } = await supabase.from('profiles').select('*').eq('id', actingUserId).single();
+        const { data: userData } = await supabase.auth.admin.getUserById(actingUserId);
+        const meta = readUserMetadata(userData?.user);
+
+        const role = profile?.role || meta.role;
+        const profileEmail = profile?.email || userData?.user?.email;
+        const assignedBoards = pickAssignedBoards(profile).length > 0 ? pickAssignedBoards(profile) : meta.assigned_boards;
+        const isAdmin = role === 'admin' || normalizeEmail(profileEmail) === ADMIN_EMAIL;
+
+        const { data: company, error: companyError } = await supabase
+            .from('companies')
+            .select('id,name,board_id,created_by')
+            .eq('id', companyId)
+            .single();
+
+        if (companyError || !company) {
+            res.status(404).json({ error: 'Company not found.' });
+            return;
+        }
+
+        if (!isAdmin) {
+            const isCreator = String(company.created_by || '') === actingUserId;
+            const companyBoardLabel = normalizeBoardName(company.board_id);
+            const canAccessBoard = assignedBoards.includes(companyBoardLabel) || assignedBoards.includes(`Board ${company.board_id}`);
+            if (!isCreator && !canAccessBoard) {
+                res.status(403).json({ error: 'Employees can only edit companies they created or companies in assigned boards.' });
+                return;
+            }
+        }
+
+        let effectiveBoard = requestedBoard || normalizeBoardName(company.board_id) || 'Board A';
+        if (isAdmin) {
+            if (!ALLOWED_BOARDS.has(effectiveBoard)) {
+                res.status(400).json({ error: 'Only Board A, Board B, or Board C are allowed.' });
+                return;
+            }
+        } else {
+            if (assignedBoards.length === 0) {
+                res.status(403).json({ error: 'Employee has no assigned boards.' });
+                return;
+            }
+            if (!requestedBoard) {
+                effectiveBoard = normalizeBoardName(company.board_id) || normalizeBoardName(assignedBoards[0]);
+            }
+            if (!assignedBoards.includes(effectiveBoard)) {
+                res.status(403).json({ error: 'Employees can only move companies within assigned boards.' });
+                return;
+            }
+        }
+
+        const boardId = boardNameToId(effectiveBoard);
+        if (!boardId) {
+            res.status(400).json({ error: 'Invalid board mapping.' });
+            return;
+        }
+
+        const { data: duplicate } = await supabase
+            .from('companies')
+            .select('id')
+            .eq('name', normalizedName)
+            .eq('board_id', boardId)
+            .neq('id', companyId)
+            .maybeSingle();
+        if (duplicate?.id) {
+            res.status(409).json({ error: 'A company with that name already exists in this board.' });
+            return;
+        }
+
+        const { data: updated, error: updateError } = await supabase
+            .from('companies')
+            .update({ name: normalizedName, board_id: boardId })
+            .eq('id', companyId)
+            .select('id,name,board_id')
+            .single();
+
+        if (updateError || !updated) {
+            res.status(500).json({ error: updateError?.message || 'Failed to update company.' });
+            return;
+        }
+
+        res.json({ success: true, company: updated });
+    } catch (e: any) {
+        console.error('[API] Company update failed:', e);
+        res.status(500).json({ error: e.message || 'Failed to update company.' });
+    }
+});
+
+app.delete('/api/companies/:companyId', async (req, res) => {
+    try {
+        const companyId = String(req.params.companyId || '').trim();
+        const actingUserId = String(req.body?.acting_user_id || '').trim();
+
+        if (!isUuid(companyId) || !isUuid(actingUserId)) {
+            res.status(400).json({ error: 'Valid companyId and acting_user_id are required.' });
+            return;
+        }
+
+        const supabase = getDb();
+        const { data: profile } = await supabase.from('profiles').select('*').eq('id', actingUserId).single();
+        const { data: userData } = await supabase.auth.admin.getUserById(actingUserId);
+        const meta = readUserMetadata(userData?.user);
+
+        const role = profile?.role || meta.role;
+        const profileEmail = profile?.email || userData?.user?.email;
+        const assignedBoards = pickAssignedBoards(profile).length > 0 ? pickAssignedBoards(profile) : meta.assigned_boards;
+        const isAdmin = role === 'admin' || normalizeEmail(profileEmail) === ADMIN_EMAIL;
+
+        const { data: company, error: companyError } = await supabase
+            .from('companies')
+            .select('id,name,board_id,created_by')
+            .eq('id', companyId)
+            .single();
+
+        if (companyError || !company) {
+            res.status(404).json({ error: 'Company not found.' });
+            return;
+        }
+
+        if (!isAdmin) {
+            const isCreator = String(company.created_by || '') === actingUserId;
+            const companyBoardLabel = normalizeBoardName(company.board_id);
+            const canAccessBoard = assignedBoards.includes(companyBoardLabel) || assignedBoards.includes(`Board ${company.board_id}`);
+            if (!isCreator && !canAccessBoard) {
+                res.status(403).json({ error: 'Employees can only delete companies they created or companies in assigned boards.' });
+                return;
+            }
+        }
+
+        const { count } = await supabase
+            .from('drivers_new')
+            .select('id', { count: 'exact', head: true })
+            .eq('company_id', companyId);
+
+        if ((count || 0) > 0) {
+            res.status(409).json({ error: 'Delete or move all drivers in this company first.' });
+            return;
+        }
+
+        const { error: deleteError } = await supabase.from('companies').delete().eq('id', companyId);
+        if (deleteError) {
+            res.status(500).json({ error: deleteError.message || 'Failed to delete company.' });
+            return;
+        }
+
+        res.json({ success: true });
+    } catch (e: any) {
+        console.error('[API] Company delete failed:', e);
+        res.status(500).json({ error: e.message || 'Failed to delete company.' });
+    }
+});
+
 const handleBroadcast = async (req: express.Request, res: express.Response) => {
     const files = req.files as Express.Multer.File[] | undefined;
 

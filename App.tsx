@@ -906,7 +906,8 @@ const App: React.FC = () => {
         const inserted = {
           id: data.company.id as string,
           name: data.company.name as string,
-          boardId: (data.company.board_id as string | null) ?? null
+          boardId: (data.company.board_id as string | null) ?? null,
+          createdBy: activeUserId
         };
         setCompanies((prev) => {
           const withoutDup = prev.filter((c) => c.id !== inserted.id && c.name !== inserted.name);
@@ -916,6 +917,56 @@ const App: React.FC = () => {
       toast.success(data?.existed ? 'Company already exists.' : 'Company created.');
     } catch (error: any) {
       toast.error(error?.message || 'Failed to create company.');
+    }
+  };
+
+  const handleUpdateCompany = async (companyId: string, payload: { name: string; board?: string }) => {
+    if (!activeUserId) return;
+    const response = await fetch(apiUrl(`/api/companies/${companyId}`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        acting_user_id: activeUserId,
+        name: payload.name,
+        board: payload.board
+      })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data?.error || `Request failed (${response.status})`);
+
+    const nextBoardId = (data?.company?.board_id as string | null) ?? null;
+    const nextBoardLabel = nextBoardId ? `Board ${nextBoardId}` : payload.board;
+
+    setCompanies((prev) => prev.map((company) => (
+      company.id === companyId
+        ? { ...company, name: data.company.name as string, boardId: nextBoardId }
+        : company
+    )).sort((a, b) => a.name.localeCompare(b.name)));
+
+    setDrivers((prev) => prev.map((driver) => (
+      driver.companyId === companyId
+        ? { ...driver, company: data.company.name as string, board: nextBoardLabel || driver.board, boardId: nextBoardId }
+        : driver
+    )));
+  };
+
+  const handleDeleteCompany = async (companyId: string) => {
+    if (!activeUserId) return;
+    const targetCompany = companies.find((c) => c.id === companyId);
+    if (!targetCompany) return;
+
+    setCompanies((prev) => prev.filter((company) => company.id !== companyId));
+    try {
+      const response = await fetch(apiUrl(`/api/companies/${companyId}`), {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ acting_user_id: activeUserId })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || `Request failed (${response.status})`);
+    } catch (error: any) {
+      setCompanies((prev) => [...prev, targetCompany].sort((a, b) => a.name.localeCompare(b.name)));
+      throw error;
     }
   };
 
@@ -1033,6 +1084,8 @@ const App: React.FC = () => {
                 onUpdateDriver={handleUpdateDriver}
                 onAddDriver={handleAddDriver}
                 onAddCompany={handleAddCompany}
+                onUpdateCompany={handleUpdateCompany}
+                onDeleteCompany={handleDeleteCompany}
                 onDeleteDriver={handleDeleteDriver}
                 onManualSendEmail={handleManualSendEmail}
                 onResetDriver={handleResetDriver}

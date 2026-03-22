@@ -80,6 +80,7 @@ export interface Company {
   id: string;
   name: string;
   boardId: string | null;
+  createdBy?: string | null;
 }
 
 export interface EmailTemplateMap {

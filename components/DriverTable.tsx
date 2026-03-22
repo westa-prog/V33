@@ -44,6 +44,8 @@ interface DriverTableProps {
   onUpdateDriver: (id: string, updates: Partial<Driver>) => void;
   onAddDriver: (driver: Omit<Driver, 'id' | 'emailSent' | 'lastEmailTime'>) => void;
   onAddCompany: (payload: { name: string; board?: string }) => Promise<void> | void;
+  onUpdateCompany: (companyId: string, payload: { name: string; board?: string }) => Promise<void> | void;
+  onDeleteCompany: (companyId: string) => Promise<void> | void;
   onDeleteDriver: (id: string) => void;
   onManualSendEmail: (id: string) => Promise<{ sentAt: string }>;
   onResetDriver: (id: string) => void;
@@ -62,6 +64,8 @@ export const DriverTable: React.FC<DriverTableProps> = ({
   onUpdateDriver,
   onAddDriver,
   onAddCompany,
+  onUpdateCompany,
+  onDeleteCompany,
   onDeleteDriver,
   onManualSendEmail,
   onResetDriver,
@@ -78,6 +82,9 @@ export const DriverTable: React.FC<DriverTableProps> = ({
   const [selectedCompanyName, setSelectedCompanyName] = useState<string | null>(null);
   const [companySearchQuery, setCompanySearchQuery] = useState('');
   const [companyStatusFilter, setCompanyStatusFilter] = useState<'ALL' | 'ACTIVE' | 'ATTENTION' | 'INACTIVE'>('ALL');
+  const [editingCompanyName, setEditingCompanyName] = useState('');
+  const [editingCompanyBoard, setEditingCompanyBoard] = useState(fixedBoard || 'Board A');
+  const [isSavingCompany, setIsSavingCompany] = useState(false);
 
   const handleSendFollowUp = async (driverId: string) => {
     const confirmed = window.confirm('Send alert email now?');
@@ -309,12 +316,45 @@ export const DriverTable: React.FC<DriverTableProps> = ({
     setNewCompany({ name: '', board: fixedBoard || 'Board A' });
   };
 
+  const handleSaveCompany = async () => {
+    if (!selectedCompanySummary?.id || !editingCompanyName.trim()) return;
+    setIsSavingCompany(true);
+    try {
+      await onUpdateCompany(selectedCompanySummary.id, {
+        name: editingCompanyName.trim(),
+        board: editingCompanyBoard
+      });
+    } catch (error: any) {
+      alert(error?.message || 'Failed to update company.');
+    } finally {
+      setIsSavingCompany(false);
+    }
+  };
+
+  const handleRemoveCompany = async () => {
+    if (!selectedCompanySummary?.id) return;
+    if (!window.confirm(`Delete ${selectedCompanySummary.name}?`)) return;
+    try {
+      await onDeleteCompany(selectedCompanySummary.id);
+      setSelectedCompanyName(null);
+      setFilters.setCompanyFilter('ALL');
+    } catch (error: any) {
+      alert(error?.message || 'Failed to delete company.');
+    }
+  };
+
   const hasActiveFilters = filters.searchQuery !== '' || filters.eldFilter !== 'ALL' || filters.dutyFilter !== 'ALL' || filters.companyFilter !== 'ALL' || filters.boardFilter !== 'ALL';
   const hasDetailFilters = filters.searchQuery !== '' || filters.eldFilter !== 'ALL' || filters.dutyFilter !== 'ALL' || filters.boardFilter !== 'ALL';
 
   useEffect(() => {
     setSelectedIds(new Set());
   }, [selectedCompanyName]);
+
+  useEffect(() => {
+    if (!selectedCompanySummary) return;
+    setEditingCompanyName(selectedCompanySummary.name);
+    setEditingCompanyBoard(selectedCompanySummary.board || fixedBoard || 'Board A');
+  }, [fixedBoard, selectedCompanySummary]);
 
   return (
     <div className="space-y-4 relative">
@@ -517,8 +557,22 @@ export const DriverTable: React.FC<DriverTableProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-5">
               <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Company</p>
-              <h4 className="mt-2 text-xl font-black text-slate-900 dark:text-white">{selectedCompanySummary?.name || selectedCompanyName}</h4>
-              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{selectedCompanySummary?.board || 'Unassigned'}</p>
+              <input
+                value={editingCompanyName}
+                onChange={(e) => setEditingCompanyName(e.target.value)}
+                className="mt-2 w-full bg-transparent text-xl font-black text-slate-900 dark:text-white outline-none"
+              />
+              <div className="mt-2">
+                <select
+                  value={editingCompanyBoard}
+                  onChange={(e) => setEditingCompanyBoard(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  {boards.map((board) => (
+                    <option key={board} value={board}>{board}</option>
+                  ))}
+                </select>
+              </div>
             </div>
             <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-5">
               <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Drivers</p>
@@ -528,6 +582,22 @@ export const DriverTable: React.FC<DriverTableProps> = ({
               <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Attention</p>
               <h4 className="mt-2 text-3xl font-black text-slate-900 dark:text-white">{selectedCompanySummary?.attentionCount || 0}</h4>
             </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleSaveCompany}
+              disabled={isSavingCompany || !editingCompanyName.trim()}
+              className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-bold hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {isSavingCompany ? 'Saving...' : 'Save Company'}
+            </button>
+            <button
+              onClick={handleRemoveCompany}
+              className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-bold hover:bg-red-700"
+            >
+              Delete Company
+            </button>
           </div>
 
           <div className="flex items-center gap-2 px-2 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-widest bg-indigo-50/50 dark:bg-indigo-950/30 w-fit py-1 rounded-md">
@@ -872,18 +942,27 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-neutral-500 dark:text-neutral-400 uppercase mb-1">Company Name</label>
-                  <select
-                    required
-                    value={newDriver.company}
-                    onChange={(e) => setNewDriver({ ...newDriver, company: e.target.value })}
-                    className="w-full px-4 py-2 text-sm border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-950 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                  >
-                    <option value="">Select company</option>
-                    {companyNames.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
+                {!selectedCompanyName ? (
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-500 dark:text-neutral-400 uppercase mb-1">Company Name</label>
+                    <select
+                      required
+                      value={newDriver.company}
+                      onChange={(e) => setNewDriver({ ...newDriver, company: e.target.value })}
+                      className="w-full px-4 py-2 text-sm border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-950 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                    >
+                      <option value="">Select company</option>
+                      {companyNames.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-500 dark:text-neutral-400 uppercase mb-1">Company</label>
+                    <div className="w-full px-4 py-2 text-sm border border-slate-200 dark:border-slate-800 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200">
+                      {selectedCompanyName}
+                    </div>
+                  </div>
+                )}
                 <div>
                   <label className="block text-xs font-bold text-neutral-500 dark:text-neutral-400 uppercase mb-1">Fleet Board</label>
                   {isAdmin || boards.length > 1 ? (
@@ -1017,21 +1096,24 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                   <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-neutral-500 dark:text-neutral-400 uppercase mb-1">Company</label>
-                  <input
-                    type="text"
+                  <select
                     required
                     value={editingDriver.company}
                     onChange={(e) => setEditingDriver({ ...editingDriver, company: e.target.value })}
-                    disabled={!isAdmin}
+                    disabled={!canManageOwnDriver(editingDriver)}
                     className="w-full px-4 py-2 text-sm border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-950 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                  />
+                  >
+                    {companyNames.map((company) => (
+                      <option key={company} value={company}>{company}</option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-neutral-500 dark:text-neutral-400 uppercase mb-1">Fleet Board</label>
                   <select
                     value={editingDriver.board}
                     onChange={(e) => setEditingDriver({ ...editingDriver, board: e.target.value })}
-                    disabled={!isAdmin}
+                    disabled={!canManageOwnDriver(editingDriver)}
                     className="w-full px-4 py-2 text-sm border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-950 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                   >
                     {boards.map(b => <option key={b} value={b}>{b}</option>)}
@@ -1044,7 +1126,7 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                   type="text"
                   value={editingDriver.appVersion}
                   onChange={(e) => setEditingDriver({ ...editingDriver, appVersion: e.target.value })}
-                  disabled={!isAdmin}
+                  disabled={!canManageOwnDriver(editingDriver)}
                   className="w-full px-4 py-2 text-sm border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-950 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                 />
               </div>
