@@ -22,8 +22,7 @@ export const menuItems = [
   { icon: Wifi, label: "Connection", id: 'Connection', color: "text-green-500" },
   { icon: FileText, label: "Profile Form", id: 'Profile Form', color: "text-orange-500" },
   { icon: Sparkles, label: "AI Assistant", id: 'AI Assistant', color: "text-purple-500" },
-  { icon: TrendingUp, label: "Activity", id: 'Activity', color: "text-emerald-500", adminOnly: true },
-  { icon: TrendingUp, label: "History", id: 'History', color: "text-red-500" },
+  { icon: TrendingUp, label: "History & Activity", id: 'History', color: "text-emerald-500" },
   { icon: Mail, label: "Broadcast", id: 'Broadcast', color: "text-rose-500" },
   { icon: Settings, label: "Settings", id: 'Settings', color: "text-slate-500" },
   { icon: UserPlus, label: "Admin Panel", id: 'Admin Panel', color: "text-indigo-500", adminOnly: true }

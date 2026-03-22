@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { Mail, AlertTriangle } from 'lucide-react';
 import { Driver, EmailLogEntry } from '../types';
 
@@ -15,6 +15,7 @@ export const ProfileForm: React.FC<ProfileFormProps> = ({ drivers, emailLogs, on
     const [boardFilter, setBoardFilter] = useState<string | 'ALL'>('ALL');
     const [statusFilter, setStatusFilter] = useState<'ALL' | 'UPDATED' | 'WARNING' | 'RISK' | 'OVERDUE' | 'EMAILED'>('ALL');
     const [nameSearch, setNameSearch] = useState('');
+    const promptedCyclesRef = useRef<Set<string>>(new Set());
 
     // Extract unique boards for the filter dropdown
     const boards = Array.from(new Set(drivers.map(d => d.board).filter(Boolean)));
@@ -146,7 +147,12 @@ export const ProfileForm: React.FC<ProfileFormProps> = ({ drivers, emailLogs, on
         return () => clearInterval(timer);
     }, []);
 
-    const handleSend = async (driver: any, days: 3 | 5) => {
+    const handleSend = async (driver: any, days: 3 | 5, skipConfirm = false) => {
+        if (!skipConfirm) {
+            const confirmed = window.confirm(`Send the ${days}-day profile form reminder to ${driver.name}?`);
+            if (!confirmed) return;
+        }
+
         setSendingState({ id: driver.id, days });
         try {
             await onSendReminder(driver.id, days);
@@ -158,6 +164,32 @@ export const ProfileForm: React.FC<ProfileFormProps> = ({ drivers, emailLogs, on
             setSendingState(null);
         }
     };
+
+    React.useEffect(() => {
+        if (sendingState) return;
+
+        const autoTarget =
+            enrichedDrivers.find((driver) => driver.needs5DayEmail) ||
+            enrichedDrivers.find((driver) => driver.needs3DayEmail);
+
+        if (!autoTarget) return;
+
+        const reminderDays: 3 | 5 = autoTarget.needs5DayEmail ? 5 : 3;
+        const cycleKey = `${autoTarget.id}:${reminderDays}:${autoTarget.lastPFUpdate || 'none'}:${autoTarget.last3DayEmail || 'none'}:${autoTarget.last5DayEmail || 'none'}`;
+        if (promptedCyclesRef.current.has(cycleKey)) return;
+
+        promptedCyclesRef.current.add(cycleKey);
+
+        const confirmed = window.confirm(
+            `${autoTarget.name} is ${reminderDays === 5 ? '5+ days' : '3 days'} stale on Profile Form. Do you want to send the reminder email now?`
+        );
+
+        if (confirmed) {
+            handleSend(autoTarget, reminderDays, true).catch((error) => {
+                console.error('Automatic reminder send failed:', error);
+            });
+        }
+    }, [enrichedDrivers, sendingState]);
 
     const handleBulkSend = async (days: 3 | 5) => {
         const targets = enrichedDrivers.filter(d => days === 3 ? d.needs3DayEmail : d.needs5DayEmail);

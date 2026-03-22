@@ -6,6 +6,12 @@ import { motion } from 'framer-motion';
 import { supabase } from '../supabase';
 import Hero from './ui/animated-shader-hero';
 
+const normalizeAuthRole = (value: unknown): AuthUser['role'] => {
+  const role = String(value || '').trim().toLowerCase();
+  if (role === 'admin' || role === 'employee' || role === 'user') return role;
+  return undefined;
+};
+
 interface LoginProps {
   onLogin: (user: AuthUser) => void;
 }
@@ -24,7 +30,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
       uid: signedInUser.id,
       email: signedInUser.email || email,
       name: (signedInUser.user_metadata?.full_name as string) || email.split('@')[0],
-      role: (signedInUser.user_metadata?.role as string) || undefined,
+      role: normalizeAuthRole(signedInUser.user_metadata?.role),
       adminId: (signedInUser.user_metadata?.admin_id as string) || undefined,
       assignedBoards: Array.isArray(signedInUser.user_metadata?.assigned_boards)
         ? signedInUser.user_metadata.assigned_boards

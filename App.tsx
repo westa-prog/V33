@@ -71,48 +71,112 @@ const isPseudoRecipientEmail = (email?: string | null): boolean => {
   const value = String(email || '').trim().toLowerCase();
   return value.endsWith(`@${PSEUDO_EMAIL_DOMAIN}`) || value.endsWith(`@${LEGACY_PSEUDO_EMAIL_DOMAIN}`);
 };
-const renderEmailTemplate = (template: string, driver: Driver, extras?: { staleDays?: number; lastPfUpdateLabel?: string }) => {
+const normalizeAuthRole = (value: unknown): AuthUser['role'] => {
+  const role = String(value || '').trim().toLowerCase();
+  if (role === 'admin' || role === 'employee' || role === 'user') return role;
+  return undefined;
+};
+const renderEmailTemplate = (
+  template: string,
+  driver: Driver,
+  extras?: {
+    staleDays?: number;
+    lastPfUpdateLabel?: string;
+    dutyStatus?: string;
+    eldConnection?: string;
+    followUpRequired?: string;
+    profileFormStatus?: string;
+    senderName?: string;
+  }
+) => {
   return template
     .replace(/{{\s*driver_name\s*}}/gi, driver.name || '')
     .replace(/{{\s*driver_email\s*}}/gi, driver.email || '')
     .replace(/{{\s*company\s*}}/gi, driver.company || '')
     .replace(/{{\s*board\s*}}/gi, driver.board || '')
     .replace(/{{\s*stale_days\s*}}/gi, String(extras?.staleDays ?? ''))
-    .replace(/{{\s*last_pf_update\s*}}/gi, extras?.lastPfUpdateLabel || '');
+    .replace(/{{\s*last_pf_update\s*}}/gi, extras?.lastPfUpdateLabel || '')
+    .replace(/{{\s*duty_status\s*}}/gi, extras?.dutyStatus || String(driver.dutyStatus || 'Not Set'))
+    .replace(/{{\s*eld_connection\s*}}/gi, extras?.eldConnection || String(driver.eldStatus || 'Unknown'))
+    .replace(/{{\s*follow_up_required\s*}}/gi, extras?.followUpRequired || String(driver.followUp || 'None'))
+    .replace(/{{\s*profile_form_status\s*}}/gi, extras?.profileFormStatus || '')
+    .replace(/{{\s*sender_name\s*}}/gi, extras?.senderName || '');
 };
 
-const buildFollowUpEmail = (driverName: string) => {
+const buildFollowUpEmail = (driverName: string, senderName: string) => {
   const subject = `ELD Disconnected - Action Required`;
   const body =
     `Hi ${driverName},\n\n` +
     `Your ELD is showing as DISCONNECTED.\n` +
     `Please open the ELD app and reconnect as soon as possible.\n\n` +
     `If you need help, reply to this message.\n\n` +
+    `Sent by: ${senderName}\n\n` +
     `Thanks.`;
   return { subject, body };
 };
-const buildConnectionAutomationEmail = (driverName: string, dutyStatus?: DutyStatus | null) => {
-  if (dutyStatus === DutyStatus.DRIVING) {
-    return {
-      subject: `Urgent: ELD Disconnected While Driving`,
-      body:
-        `Hi ${driverName},\n\n` +
-        `Our system shows your ELD is DISCONNECTED while your status is DRIVING.\n` +
-        `Please safely pull over when possible and reconnect your ELD immediately.\n\n` +
-        `Reply to this message if you need support.\n\n` +
-        `Thanks.`
-    };
-  }
-
+const buildConnectionAutomationEmail = (driver: Driver, senderName: string) => {
   return {
-    subject: `Action Required: ELD Disconnected While On Duty`,
+    subject: `Automatic ELD Alert - Reconnect Required`,
     body:
-      `Hi ${driverName},\n\n` +
-      `Our system shows your ELD is DISCONNECTED while your status is ON DUTY.\n` +
-      `Please reconnect your ELD as soon as possible to stay compliant.\n\n` +
-      `Reply to this message if you need support.\n\n` +
-      `Thanks.`
+      `Hello ${driver.name},\n\n` +
+      `This is an automatic alert regarding your ELD (Electronic Logging Device) status.\n\n` +
+      `Current Status:\n` +
+      `- Driver: ${driver.name}\n` +
+      `- Status: ${driver.dutyStatus || 'Not Set'}\n` +
+      `- ELD Connection: ${driver.eldStatus || 'Unknown'}\n` +
+      `- Follow Up Required: Reconnect\n\n` +
+      `Please reconnect your ELD device at your earliest convenience. A disconnected ELD while on duty or driving is a compliance violation.\n\n` +
+      `If you have any questions or need assistance, please contact ELD team immediately.\n\n` +
+      `Sent by: ${senderName}\n\n` +
+      `Best regards,\n` +
+      `ALGO Service Team`
   };
+};
+
+const buildProfileFormReminderEmail = (driver: Driver, days: 3 | 5, senderName: string) => {
+  const profileFormStatus = days === 3 ? 'Incomplete (3 Days)' : 'Incomplete (5+ Days)';
+  const followUpRequired = days === 3
+    ? 'Update Profile & Send Documents'
+    : 'Immediate Update & Document Submission';
+  const subject = days === 3
+    ? 'Automatic Profile Form Reminder - 3 Days Stale'
+    : 'Urgent Profile Form Alert - 5+ Days Stale';
+  const body = days === 3
+    ? `Hello ${driver.name},\n\n` +
+      `This is an automatic reminder regarding your profile form status.\n\n` +
+      `Current Status:\n` +
+      `- Driver: ${driver.name}\n` +
+      `- Profile Form: ${profileFormStatus}\n` +
+      `- Follow Up Required: ${followUpRequired}\n\n` +
+      `Your profile form has not been updated for 3 days. Keeping your information current is required for compliance.\n\n` +
+      `Action Required:\n` +
+      `- Please complete or update your profile form as soon as possible\n` +
+      `- Send your BOL (Bill of Lading) and all shipping documents via Telegram\n\n` +
+      `Do NOT reply to this email.\n` +
+      `All documents must be submitted through Telegram.\n\n` +
+      `If you need assistance, please contact the dispatch team.\n\n` +
+      `Sent by: ${senderName}\n\n` +
+      `Best regards,\n` +
+      `ALGO Service Team`
+    : `Hello ${driver.name},\n\n` +
+      `This is an urgent automatic alert regarding your profile form status.\n\n` +
+      `Current Status:\n` +
+      `- Driver: ${driver.name}\n` +
+      `- Profile Form: ${profileFormStatus}\n` +
+      `- Follow Up Required: ${followUpRequired}\n\n` +
+      `Your profile form has been incomplete for over 5 days. This is now considered critical and may affect your ability to receive loads.\n\n` +
+      `Immediate Action Required:\n` +
+      `- Complete your profile form today\n` +
+      `- Send your BOL (Bill of Lading) and all shipping documents via Telegram immediately\n\n` +
+      `Do NOT reply to this email.\n` +
+      `All documents must be sent through Telegram only.\n\n` +
+      `Failure to comply may result in dispatch restrictions.\n\n` +
+      `If you need assistance, contact the dispatch team immediately.\n\n` +
+      `Sent by: ${senderName}\n\n` +
+      `Best regards,\n` +
+      `ALGO Service Team`;
+
+  return { subject, body, profileFormStatus, followUpRequired };
 };
 import {
   ArrowLeftRight,
@@ -180,6 +244,7 @@ const App: React.FC = () => {
   const activeUserId = authUser?.uid;
   const googleClientId = ((window as any).__GOOGLE_CLIENT_ID__ || '').trim();
   const isAdminUser = authUser?.role === 'admin' || authUser?.email === 'westa@algogroup.us';
+  const senderDisplayName = authUser?.name || user?.name || authUser?.email || user?.email || 'Unknown sender';
   const driverOwnerUserId = authUser?.role === 'employee' && authUser?.adminId
     ? authUser.adminId
     : activeUserId;
@@ -209,8 +274,12 @@ const App: React.FC = () => {
     formData.append('recipients', JSON.stringify([recipient]));
     formData.append('subject', subject);
     formData.append('message', body);
+    const { data: sessionData } = await supabase.auth.getSession();
+    const sessionToken = sessionData.session?.access_token;
+    if (!sessionToken) throw new Error('Your session expired. Please sign in again.');
     const res = await fetch(apiUrl('/api/broadcast'), {
       method: 'POST',
+      headers: { Authorization: `Bearer ${sessionToken}` },
       body: formData
     });
     const data = await res.json().catch(() => ({}));
@@ -266,7 +335,7 @@ const App: React.FC = () => {
         uid: sessionUser.id,
         email: sessionUser.email || prev?.email || '',
         name: (sessionUser.user_metadata?.full_name as string) || prev?.name || sessionUser.email?.split('@')[0] || 'User',
-        role: (sessionUser.user_metadata?.role as string) || prev?.role,
+        role: normalizeAuthRole(sessionUser.user_metadata?.role) || prev?.role,
         adminId: (sessionUser.user_metadata?.admin_id as string) || prev?.adminId,
         assignedBoards: Array.isArray(sessionUser.user_metadata?.assigned_boards)
           ? normalizeBoardList(sessionUser.user_metadata.assigned_boards)
@@ -298,7 +367,7 @@ const App: React.FC = () => {
         uid: sessionUser.id,
         email: sessionUser.email || prev?.email || '',
         name: (sessionUser.user_metadata?.full_name as string) || prev?.name || sessionUser.email?.split('@')[0] || 'User',
-        role: (sessionUser.user_metadata?.role as string) || prev?.role,
+        role: normalizeAuthRole(sessionUser.user_metadata?.role) || prev?.role,
         adminId: (sessionUser.user_metadata?.admin_id as string) || prev?.adminId,
         assignedBoards: Array.isArray(sessionUser.user_metadata?.assigned_boards)
           ? normalizeBoardList(sessionUser.user_metadata.assigned_boards)
@@ -625,15 +694,20 @@ const App: React.FC = () => {
 
     const isConnectionAutomation = options?.automationType === 'driving_disconnected' || options?.automationType === 'onduty_disconnected';
     const { subject, body } = isConnectionAutomation
-      ? buildConnectionAutomationEmail(driver.name, driver.dutyStatus)
-      : buildFollowUpEmail(driver.name);
+      ? buildConnectionAutomationEmail(driver, senderDisplayName)
+      : buildFollowUpEmail(driver.name, senderDisplayName);
     const selectedTemplate = options?.automationType === 'driving_disconnected'
       ? authUser?.emailTemplates?.connection_driving
       : options?.automationType === 'onduty_disconnected'
         ? authUser?.emailTemplates?.connection_onduty
         : authUser?.emailTemplate;
     const templatedBody = selectedTemplate
-      ? renderEmailTemplate(selectedTemplate, driver)
+      ? renderEmailTemplate(selectedTemplate, driver, {
+          dutyStatus: String(driver.dutyStatus || 'Not Set'),
+          eldConnection: String(driver.eldStatus || 'Unknown'),
+          followUpRequired: 'Reconnect',
+          senderName: senderDisplayName
+        })
       : body;
     let sentVia: 'Simulation' | 'SMTP' | 'Gmail API' = 'Simulation';
 
@@ -687,25 +761,24 @@ const App: React.FC = () => {
     const driver = drivers.find(d => d.id === driverId);
     if (!driver) throw new Error('Driver not found');
 
-    const subject = `Profile Form Stale Alert - ${days} Day Notice`;
+    const { subject, body, profileFormStatus, followUpRequired } = buildProfileFormReminderEmail(driver, days, senderDisplayName);
     const lastPfLabel = driver.lastPFUpdate
       ? new Date(driver.lastPFUpdate).toLocaleString()
       : 'No PF update date recorded';
     const staleDays = driver.lastPFUpdate
       ? Math.floor((Date.now() - new Date(driver.lastPFUpdate).getTime()) / (1000 * 60 * 60 * 24))
       : days;
-    const body =
-      `Hi ${driver.name},\n\n` +
-      `This is your ${days}-day profile form reminder.\n` +
-      `Last Profile Form update: ${lastPfLabel}\n` +
-      `Your profile form has not been updated for ${days} days.\n` +
-      `Please log in to the portal and update your profile form as soon as possible.\n\n` +
-      `Thank you.`;
     const selectedTemplate = days === 3
       ? authUser?.emailTemplates?.pf_3_day
       : authUser?.emailTemplates?.pf_5_day;
     const finalBody = selectedTemplate
-      ? renderEmailTemplate(selectedTemplate, driver, { staleDays, lastPfUpdateLabel: lastPfLabel })
+      ? renderEmailTemplate(selectedTemplate, driver, {
+          staleDays,
+          lastPfUpdateLabel: lastPfLabel,
+          profileFormStatus,
+          followUpRequired,
+          senderName: senderDisplayName
+        })
       : body;
 
     let sentVia: 'Simulation' | 'SMTP' | 'Gmail API' = 'Simulation';
@@ -1101,26 +1174,33 @@ const App: React.FC = () => {
         {activeTab === 'Profile Form' && <ProfileForm drivers={filteredDrivers} emailLogs={emailLogs} onSendReminder={handleProfileFormReminder} onUpdatePFDate={handleUpdatePFDate} />}
         {activeTab === 'AI Assistant' && <AIAssistant userId={authUser?.uid} />}
         {activeTab === 'Broadcast' && <EmailBroadcast drivers={filteredDrivers} assignedBoard={fixedEmployeeBoard} userId={activeUserId} userAccessToken={user?.accessToken} />}
-        {activeTab === 'Activity' && isAdminUser && (
-          <div className="space-y-4">
-            {emailLogs
-              .filter(log => log.type === 'activity' || log.sentVia === 'System')
-              .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-              .map(log => (
-                <div key={log.id} className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
-                  <p className="text-sm font-semibold text-slate-900 dark:text-white">{log.content}</p>
-                  <p className="text-xs text-slate-500 mt-2">{new Date(log.timestamp).toLocaleString()}</p>
-                </div>
-              ))}
-            {emailLogs.filter(log => log.type === 'activity' || log.sentVia === 'System').length === 0 && (
-              <div className="p-6 text-sm text-slate-500 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
-                No activity yet.
-              </div>
-            )}
-          </div>
-        )}
         {activeTab === 'History' && (
           <div className="space-y-4">
+            {isAdminUser && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-bold text-slate-900 dark:text-white">Activity</h3>
+                </div>
+                {emailLogs
+                  .filter(log => log.type === 'activity' || log.sentVia === 'System')
+                  .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+                  .map(log => (
+                    <div key={log.id} className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
+                      <p className="text-sm font-semibold text-slate-900 dark:text-white">{log.content}</p>
+                      <p className="text-xs text-slate-500 mt-2">{new Date(log.timestamp).toLocaleString()}</p>
+                    </div>
+                  ))}
+                {emailLogs.filter(log => log.type === 'activity' || log.sentVia === 'System').length === 0 && (
+                  <div className="p-6 text-sm text-slate-500 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
+                    No activity yet.
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex items-center justify-between pt-2">
+              <h3 className="text-lg font-bold text-slate-900 dark:text-white">Email History</h3>
+            </div>
             <div className="flex gap-2">
               <button
                 type="button"

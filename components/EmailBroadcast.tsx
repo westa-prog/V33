@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { Mail, Send, Paperclip, X, File as FileIcon, Image as ImageIcon, Video as VideoIcon, Loader2, CheckCircle2 } from 'lucide-react';
 import { Driver } from '../types';
 import { sendGmailBroadcast } from '../services/gmailService';
+import { supabase } from '../supabase';
 
 interface EmailBroadcastProps {
     drivers: Driver[];
@@ -20,6 +21,13 @@ export const EmailBroadcast: React.FC<EmailBroadcastProps> = ({ drivers, assigne
     const [selectedDrivers, setSelectedDrivers] = useState<string[]>([]);
     const [isSending, setIsSending] = useState(false);
     const [sendSuccess, setSendSuccess] = useState(false);
+
+    const getAuthHeaders = async () => {
+        const { data } = await supabase.auth.getSession();
+        const token = data.session?.access_token;
+        if (!token) throw new Error('Your session expired. Please sign in again.');
+        return { Authorization: `Bearer ${token}` };
+    };
     
     // Derived unique boards from current driver list
     const availableBoards = Array.from(new Set(drivers.map(d => d.board).filter(Boolean))) as string[];
@@ -105,6 +113,7 @@ export const EmailBroadcast: React.FC<EmailBroadcastProps> = ({ drivers, assigne
 
                 const res = await fetch(apiUrl('/api/broadcast'), {
                     method: 'POST',
+                    headers: await getAuthHeaders(),
                     body: formData
                 });
 

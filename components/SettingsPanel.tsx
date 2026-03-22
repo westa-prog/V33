@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { AuthUser, Driver, DutyStatus, ELDStatus, EmailLogEntry, EmailTemplateMap } from '../types';
+import { supabase } from '../supabase';
 
 interface SettingsPanelProps {
   currentUser: AuthUser;
@@ -52,6 +53,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ currentUser, isAdm
   const [testingConnection, setTestingConnection] = useState(false);
   const [testingSend, setTestingSend] = useState(false);
   const [testRecipient, setTestRecipient] = useState(currentUser?.email || '');
+  const getAuthHeaders = async (includeJson = false) => {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) throw new Error('Your session expired. Please sign in again.');
+    return {
+      ...(includeJson ? { 'Content-Type': 'application/json' } : {}),
+      Authorization: `Bearer ${token}`
+    };
+  };
   const templateOptions: Array<{ key: keyof EmailTemplateMap; label: string }> = [
     { key: 'connection_driving', label: 'Connection: Driving + Disconnected' },
     { key: 'connection_onduty', label: 'Connection: On Duty + Disconnected' },
@@ -389,7 +399,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ currentUser, isAdm
     setMessage('');
     try {
       const res = await fetch(apiUrl('/api/email/test-connection'), {
-        method: 'POST'
+        method: 'POST',
+        headers: await getAuthHeaders()
       });
       const data = await res.json().catch(() => ({}));
       setEmailDiagnostics(data);
@@ -408,7 +419,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ currentUser, isAdm
     try {
       const res = await fetch(apiUrl('/api/email/test-send'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await getAuthHeaders(true),
         body: JSON.stringify({ to: testRecipient })
       });
       const data = await res.json().catch(() => ({}));

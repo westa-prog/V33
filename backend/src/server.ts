@@ -221,6 +221,56 @@ const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89
 const ALLOWED_BOARDS = new Set(['Board A', 'Board B', 'Board C']);
 const ADMIN_EMAIL = 'westa@algogroup.us';
 const APP_URL = String(process.env.APP_URL || process.env.FRONTEND_URL || '').trim().replace(/\/+$/, '');
+type AuthenticatedRequest = express.Request & {
+    authUser?: any;
+    authProfile?: { id: string; email?: string | null; role?: string | null } | null;
+};
+
+const getBearerToken = (req: express.Request): string => {
+    const value = String(req.headers.authorization || '').trim();
+    if (!value.toLowerCase().startsWith('bearer ')) return '';
+    return value.slice(7).trim();
+};
+
+const requireAuth: express.RequestHandler = async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const token = getBearerToken(req);
+        if (!token) {
+            res.status(401).json({ error: 'Authorization bearer token is required.' });
+            return;
+        }
+
+        const supabase = getDb();
+        const { data: userData, error: userError } = await supabase.auth.getUser(token);
+        if (userError || !userData?.user) {
+            res.status(401).json({ error: 'Invalid or expired session token.' });
+            return;
+        }
+
+        req.authUser = userData.user;
+        const { data: profile } = await supabase
+            .from('profiles')
+            .select('id,email,role')
+            .eq('id', userData.user.id)
+            .maybeSingle();
+        req.authProfile = profile || null;
+        next();
+    } catch (e: any) {
+        res.status(401).json({ error: e?.message || 'Authentication failed.' });
+    }
+};
+
+const requireAdminAuth: express.RequestHandler = async (req: AuthenticatedRequest, res, next) => {
+    await requireAuth(req, res, async () => {
+        const authEmail = normalizeEmail(req.authProfile?.email || req.authUser?.email);
+        const authRole = String(req.authProfile?.role || req.authUser?.user_metadata?.role || '').trim().toLowerCase();
+        if (authEmail !== ADMIN_EMAIL && authRole !== 'admin') {
+            res.status(403).json({ error: 'Admin access is required for this action.' });
+            return;
+        }
+        next();
+    });
+};
 
 const cleanupUploads = (files: Express.Multer.File[] = []) => {
     for (const file of files) {
@@ -249,7 +299,7 @@ app.get('/api/status', (req, res) => {
     });
 });
 
-app.post('/api/email/test-connection', async (req, res) => {
+app.post('/api/email/test-connection', requireAdminAuth, async (req, res) => {
     try {
         const emailStatus = getEmailTransportStatus();
         const smtpSummary = getSmtpConfigSummary();
@@ -281,7 +331,7 @@ app.post('/api/email/test-connection', async (req, res) => {
     }
 });
 
-app.post('/api/email/test-send', async (req, res) => {
+app.post('/api/email/test-send', requireAdminAuth, async (req, res) => {
     try {
         const to = String(req.body?.to || '').trim().toLowerCase();
         if (!isValidEmail(to)) {
@@ -1242,7 +1292,7 @@ const handleBroadcast = async (req: express.Request, res: express.Response) => {
     }
 };
 
-app.post('/api/broadcast', upload.array('attachments', 10), handleBroadcast);
+app.post('/api/broadcast', requireAuth, upload.array('attachments', 10), handleBroadcast);
 
 app.use('/api/*', (_req, res) => {
     res.status(404).json({ error: 'API route not found' });
