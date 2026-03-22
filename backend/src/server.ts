@@ -340,6 +340,39 @@ const resolveCompanyForBoard = async (
     throw new Error(insertCompanyError?.message || 'Failed to resolve target company.');
 };
 
+const serializeDriverRow = (
+    row: any,
+    fallback?: {
+        company?: string;
+        companyId?: string | null;
+        board?: string;
+        boardId?: string | null;
+        createdBy?: string | null;
+    }
+) => ({
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    company: row.companies?.name || fallback?.company || '',
+    companyId: row.company_id || fallback?.companyId || null,
+    board: normalizeBoardName(row.board_id || row.companies?.board_id || fallback?.boardId || fallback?.board || ''),
+    boardId: row.board_id || fallback?.boardId || null,
+    createdBy: row.created_by || fallback?.createdBy || null,
+    deviceType: row.devicetype || '',
+    appVersion: row.appversion || '',
+    eldStatus: row.eldstatus || null,
+    dutyStatus: row.dutystatus || null,
+    followUp: row.followup || null,
+    emailSent: Boolean(row.emailsent),
+    hasPendingAlert: Boolean(row.haspendingalert),
+    lastEmailTime: row.lastemailtime || null,
+    lastSentAt: row.lastsentat || null,
+    lastPFUpdate: row.lastpfupdate || null,
+    lastProfileReminderAt: row.lastprofilereminderat || null,
+    last3DayEmail: row.last3dayemail || null,
+    last5DayEmail: row.last5dayemail || null
+});
+
 const checkTableReachable = async (supabase: ReturnType<typeof getDb>, table: string) => {
     const { error } = await supabase.from(table).select('*', { head: true, count: 'exact' }).limit(1);
     if (error) {
@@ -1296,33 +1329,161 @@ app.patch('/api/drivers/:driverId', async (req, res) => {
 
         res.json({
             success: true,
-            driver: {
-                id: refreshedDriver.id,
-                name: refreshedDriver.name,
-                email: refreshedDriver.email,
-                company: refreshedDriver.companies?.name || resolvedCompanyName || existingDriver.companies?.name || '',
+            driver: serializeDriverRow(refreshedDriver, {
+                company: resolvedCompanyName || existingDriver.companies?.name || '',
                 companyId: refreshedDriver.company_id || existingDriver.company_id || null,
-                board: normalizeBoardName(refreshedDriver.board_id || refreshedDriver.companies?.board_id || existingDriver.board_id || existingDriver.companies?.board_id || ''),
-                boardId: refreshedDriver.board_id || existingDriver.board_id || null,
-                createdBy: refreshedDriver.created_by || existingDriver.created_by || null,
-                deviceType: refreshedDriver.devicetype || '',
-                appVersion: refreshedDriver.appversion || '',
-                eldStatus: refreshedDriver.eldstatus || null,
-                dutyStatus: refreshedDriver.dutystatus || null,
-                followUp: refreshedDriver.followup || null,
-                emailSent: Boolean(refreshedDriver.emailsent),
-                hasPendingAlert: Boolean(refreshedDriver.haspendingalert),
-                lastEmailTime: refreshedDriver.lastemailtime || null,
-                lastSentAt: refreshedDriver.lastsentat || null,
-                lastPFUpdate: refreshedDriver.lastpfupdate || null,
-                lastProfileReminderAt: refreshedDriver.lastprofilereminderat || null,
-                last3DayEmail: refreshedDriver.last3dayemail || null,
-                last5DayEmail: refreshedDriver.last5dayemail || null
-            }
+                boardId: refreshedDriver.board_id || existingDriver.board_id || existingDriver.companies?.board_id || null,
+                createdBy: refreshedDriver.created_by || existingDriver.created_by || null
+            })
         });
     } catch (e: any) {
         console.error('[API] Driver update failed:', e);
         res.status(500).json({ error: e.message || 'Failed to update driver.' });
+    }
+});
+
+app.post('/api/drivers/reset', async (req, res) => {
+    try {
+        const actingUserId = String(req.body?.acting_user_id || '').trim();
+        const driverIds: string[] = Array.from(new Set<string>(
+            Array.isArray(req.body?.driver_ids)
+                ? req.body.driver_ids.map((value: unknown) => String(value || '').trim()).filter(isUuid)
+                : []
+        ));
+
+        if (!isUuid(actingUserId) || driverIds.length === 0) {
+            res.status(400).json({ error: 'Valid acting_user_id and at least one driver_id are required.' });
+            return;
+        }
+
+        const supabase = getDb();
+        const { data: profile, error: profileError } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', actingUserId)
+            .single();
+
+        let role = profile?.role;
+        let profileEmail = profile?.email;
+        let assignedBoards = pickAssignedBoards(profile);
+        let assignedCompanies = pickAssignedCompanies(profile);
+        let assignedCompanySet = normalizeCompanyList(assignedCompanies);
+
+        if (profileError || !profile) {
+            const { data: userData, error: userErr } = await supabase.auth.admin.getUserById(actingUserId);
+            if (userErr || !userData?.user) {
+                res.status(403).json({ error: 'Unable to resolve acting user profile.' });
+                return;
+            }
+            const meta = readUserMetadata(userData.user);
+            role = meta.role;
+            assignedBoards = meta.assigned_boards;
+            assignedCompanies = meta.assigned_companies;
+            assignedCompanySet = normalizeCompanyList(assignedCompanies);
+            profileEmail = userData.user.email;
+        } else {
+            const { data: userData } = await supabase.auth.admin.getUserById(actingUserId);
+            const meta = readUserMetadata(userData?.user);
+            role = role || meta.role;
+            if (assignedBoards.length === 0) assignedBoards = meta.assigned_boards;
+            if (assignedCompanies.length === 0) assignedCompanies = meta.assigned_companies;
+            assignedCompanySet = normalizeCompanyList(assignedCompanies);
+        }
+
+        const isAdmin = role === 'admin' || normalizeEmail(profileEmail) === ADMIN_EMAIL;
+
+        const { data: targetDrivers, error: targetError } = await supabase
+            .from('drivers_new')
+            .select('*, companies(id,name,board_id)')
+            .in('id', driverIds);
+
+        if (targetError) {
+            res.status(500).json({ error: targetError.message || 'Failed to load target drivers.' });
+            return;
+        }
+
+        const rows = targetDrivers || [];
+        if (rows.length !== driverIds.length) {
+            const foundIds = new Set<string>(rows.map((row: any) => String(row.id)));
+            const missingIds = driverIds.filter((id) => !foundIds.has(id));
+            res.status(404).json({ error: `Some drivers were not found: ${missingIds.join(', ')}` });
+            return;
+        }
+
+        if (!isAdmin) {
+            if (assignedBoards.length === 0) {
+                res.status(403).json({ error: 'Employee has no assigned boards.' });
+                return;
+            }
+
+            const normalizedAssignedBoards = assignedBoards.map(normalizeBoardName).filter(Boolean);
+            const forbiddenDriver = rows.find((driver: any) => {
+                const currentBoardName = normalizeBoardName(driver.board_id || driver.companies?.board_id || '');
+                const currentCompanyName = normalizeCompanyName(driver.companies?.name || '');
+
+                if (currentBoardName && !normalizedAssignedBoards.includes(currentBoardName)) {
+                    return true;
+                }
+
+                if (assignedCompanySet.length > 0 && currentCompanyName && !assignedCompanySet.includes(currentCompanyName.toLowerCase())) {
+                    return true;
+                }
+
+                return false;
+            });
+
+            if (forbiddenDriver) {
+                res.status(403).json({ error: 'Employee cannot reset drivers outside assigned access.' });
+                return;
+            }
+        }
+
+        const resetUpdates = {
+            eldstatus: 'Connected',
+            dutystatus: 'Not Set',
+            followup: 'None',
+            emailsent: false,
+            haspendingalert: false,
+            updated_at: new Date().toISOString()
+        };
+
+        const { error: resetError } = await supabase
+            .from('drivers_new')
+            .update(resetUpdates)
+            .in('id', driverIds);
+
+        if (resetError) {
+            res.status(500).json({ error: resetError.message || 'Failed to reset drivers.' });
+            return;
+        }
+
+        const { data: refreshedDrivers, error: refreshedError } = await supabase
+            .from('drivers_new')
+            .select('*, companies(id,name,board_id)')
+            .in('id', driverIds);
+
+        if (refreshedError) {
+            res.status(500).json({ error: refreshedError.message || 'Drivers reset but failed to reload.' });
+            return;
+        }
+
+        const order = new Map(driverIds.map((id, index) => [id, index]));
+        const orderedDrivers = [...(refreshedDrivers || [])].sort((a: any, b: any) => {
+            return (order.get(String(a.id)) ?? 0) - (order.get(String(b.id)) ?? 0);
+        });
+
+        res.json({
+            success: true,
+            drivers: orderedDrivers.map((driver: any) => serializeDriverRow(driver, {
+                company: driver.companies?.name || '',
+                companyId: driver.company_id || null,
+                boardId: driver.board_id || driver.companies?.board_id || null,
+                createdBy: driver.created_by || null
+            }))
+        });
+    } catch (e: any) {
+        console.error('[API] Driver reset failed:', e);
+        res.status(500).json({ error: e.message || 'Failed to reset drivers.' });
     }
 });
 

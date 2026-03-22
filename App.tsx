@@ -199,6 +199,22 @@ const deriveDriverAlertState = (driver: Driver): Partial<Driver> => {
     emailSent: isDisconnected ? driver.emailSent : false
   };
 };
+
+const buildDriverResetUpdates = (): Partial<Driver> => ({
+  eldStatus: ELDStatus.CONNECTED,
+  dutyStatus: DutyStatus.NOT_SET,
+  followUp: FollowUpStatus.NONE,
+  emailSent: false,
+  hasPendingAlert: false
+});
+
+const mergeDriversById = (currentDrivers: Driver[], nextDrivers: Driver[]) => {
+  const nextById = new Map(nextDrivers.map((driver) => [driver.id, driver]));
+  return currentDrivers.map((driver) => {
+    const persisted = nextById.get(driver.id);
+    return persisted ? { ...driver, ...persisted } : driver;
+  });
+};
 import {
   ArrowLeftRight,
   MessageSquare,
@@ -331,6 +347,26 @@ const App: React.FC = () => {
 
     return data?.driver || null;
   }, [activeUserId, apiBaseUrl, drivers]);
+
+  const persistDriverReset = useCallback(async (driverIds: string[]) => {
+    if (!activeUserId || driverIds.length === 0) return [] as Driver[];
+
+    const response = await fetch(apiUrl('/api/drivers/reset'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        acting_user_id: activeUserId,
+        driver_ids: driverIds
+      })
+    });
+
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(data?.error || `Driver reset failed (${response.status})`);
+    }
+
+    return Array.isArray(data?.drivers) ? data.drivers as Driver[] : [];
+  }, [activeUserId, apiBaseUrl]);
 
   const companyById = useMemo(() => {
     return new Map(companies.map((company) => [company.id, company]));
@@ -1222,29 +1258,44 @@ const App: React.FC = () => {
     }
   };
 
-  const handleResetDriver = (id: string) => {
-    if (window.confirm("Reset this driver to Connected/Not Set?")) {
-      setDrivers(prev => prev.map(d => d.id === id ? {
-        ...d,
-        eldStatus: ELDStatus.CONNECTED,
-        dutyStatus: DutyStatus.NOT_SET,
-        followUp: FollowUpStatus.NONE,
-        emailSent: false,
-        hasPendingAlert: false
-      } : d));
+  const handleResetDriver = async (id: string) => {
+    if (!window.confirm("Reset this driver to Connected/Not Set?")) return;
+
+    const previousDrivers = drivers;
+    const resetUpdates = buildDriverResetUpdates();
+    setDrivers(prev => prev.map((driver) => driver.id === id ? { ...driver, ...resetUpdates } : driver));
+
+    try {
+      const persistedDrivers = await persistDriverReset([id]);
+      if (persistedDrivers.length > 0) {
+        setDrivers(prev => mergeDriversById(prev, persistedDrivers));
+      }
+      setLastSync(new Date().toISOString());
+    } catch (error: any) {
+      setDrivers(previousDrivers);
+      alert(error?.message || 'Failed to reset driver.');
     }
   };
 
-  const handleGlobalReset = () => {
-    if (window.confirm("Reset ALL drivers to Connected status?")) {
-      setDrivers(prev => prev.map(d => ({
-        ...d,
-        eldStatus: ELDStatus.CONNECTED,
-        dutyStatus: DutyStatus.NOT_SET,
-        followUp: FollowUpStatus.NONE,
-        emailSent: false,
-        hasPendingAlert: false
-      })));
+  const handleGlobalReset = async () => {
+    if (!window.confirm("Reset ALL drivers to Connected status?")) return;
+
+    const targetDriverIds = drivers.map((driver) => driver.id);
+    if (targetDriverIds.length === 0) return;
+
+    const previousDrivers = drivers;
+    const resetUpdates = buildDriverResetUpdates();
+    setDrivers(prev => prev.map((driver) => ({ ...driver, ...resetUpdates })));
+
+    try {
+      const persistedDrivers = await persistDriverReset(targetDriverIds);
+      if (persistedDrivers.length > 0) {
+        setDrivers(prev => mergeDriversById(prev, persistedDrivers));
+      }
+      setLastSync(new Date().toISOString());
+    } catch (error: any) {
+      setDrivers(previousDrivers);
+      alert(error?.message || 'Failed to reset drivers.');
     }
   };
 
