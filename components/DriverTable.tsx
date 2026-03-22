@@ -117,7 +117,8 @@ export const DriverTable: React.FC<DriverTableProps> = ({
     setIsEditModalOpen(true);
   };
 
-  const canDeleteDriver = (driver: Driver) => isAdmin || (!!currentUserId && driver.createdBy === currentUserId);
+  const canManageOwnDriver = (driver: Driver) => isAdmin || (!!currentUserId && driver.createdBy === currentUserId);
+  const canDeleteDriver = (driver: Driver) => canManageOwnDriver(driver);
 
   const handleEditSave = () => {
     if (!editingDriver) return;
@@ -651,11 +652,11 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                   <div className="flex items-center gap-3">
-                    {(isAdmin || canDeleteDriver(driver)) && (
+                    {canManageOwnDriver(driver) && (
                       <button
                         onClick={() => openEditModal(driver)}
                         className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-400 transition-colors"
-                        title={isAdmin ? 'Edit Driver' : 'View Driver Actions'}
+                        title="Edit Driver"
                       >
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
@@ -929,23 +930,25 @@ export const DriverTable: React.FC<DriverTableProps> = ({
             <div className="p-6 space-y-4">
               <div>
                 <label className="block text-xs font-bold text-neutral-500 dark:text-neutral-400 uppercase mb-1">Full Name</label>
-                <input
-                  type="text"
-                  required
-                  value={editingDriver.name}
-                  onChange={(e) => setEditingDriver({ ...editingDriver, name: e.target.value })}
-                  className="w-full px-4 py-2 text-sm border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-950 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                />
+                  <input
+                    type="text"
+                    required
+                    value={editingDriver.name}
+                    onChange={(e) => setEditingDriver({ ...editingDriver, name: e.target.value })}
+                    disabled={!canManageOwnDriver(editingDriver)}
+                    className="w-full px-4 py-2 text-sm border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-950 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                  />
               </div>
               <div>
                 <label className="block text-xs font-bold text-neutral-500 dark:text-neutral-400 uppercase mb-1">Email Address</label>
-                <input
-                  type="email"
-                  required
-                  value={editingDriver.email}
-                  onChange={(e) => setEditingDriver({ ...editingDriver, email: e.target.value })}
-                  className="w-full px-4 py-2 text-sm border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-950 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                />
+                  <input
+                    type="email"
+                    required
+                    value={editingDriver.email}
+                    onChange={(e) => setEditingDriver({ ...editingDriver, email: e.target.value })}
+                    disabled={!canManageOwnDriver(editingDriver)}
+                    className="w-full px-4 py-2 text-sm border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-950 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                  />
               </div>
                   <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -983,7 +986,7 @@ export const DriverTable: React.FC<DriverTableProps> = ({
               </div>
 
               <div className="pt-4 flex gap-3 flex-col sm:flex-row">
-                {isAdmin && (
+                {canManageOwnDriver(editingDriver) && (
                   <button
                     onClick={handleEditSave}
                     className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
