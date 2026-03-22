@@ -49,6 +49,7 @@ interface DriverTableProps {
   onManualSendEmail: (id: string) => Promise<{ sentAt: string }>;
   onResetDriver: (id: string) => void;
   isAdmin: boolean;
+  currentUserId?: string;
   fixedBoard?: string;
 }
 
@@ -65,6 +66,7 @@ export const DriverTable: React.FC<DriverTableProps> = ({
   onManualSendEmail,
   onResetDriver,
   isAdmin,
+  currentUserId,
   fixedBoard
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -114,6 +116,8 @@ export const DriverTable: React.FC<DriverTableProps> = ({
     setEditingDriver(driver);
     setIsEditModalOpen(true);
   };
+
+  const canDeleteDriver = (driver: Driver) => isAdmin || (!!currentUserId && driver.createdBy === currentUserId);
 
   const handleEditSave = () => {
     if (!editingDriver) return;
@@ -647,7 +651,7 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                   <div className="flex items-center gap-3">
-                    {isAdmin && (
+                    {(isAdmin || canDeleteDriver(driver)) && (
                       <button
                         onClick={() => openEditModal(driver)}
                         className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-400 transition-colors"
@@ -930,7 +934,7 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                   className="w-full px-4 py-2 text-sm border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-950 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-neutral-500 dark:text-neutral-400 uppercase mb-1">Company</label>
                   <input
@@ -938,6 +942,7 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                     required
                     value={editingDriver.company}
                     onChange={(e) => setEditingDriver({ ...editingDriver, company: e.target.value })}
+                    disabled={!isAdmin}
                     className="w-full px-4 py-2 text-sm border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-950 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                   />
                 </div>
@@ -946,6 +951,7 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                   <select
                     value={editingDriver.board}
                     onChange={(e) => setEditingDriver({ ...editingDriver, board: e.target.value })}
+                    disabled={!isAdmin}
                     className="w-full px-4 py-2 text-sm border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-950 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                   >
                     {boards.map(b => <option key={b} value={b}>{b}</option>)}
@@ -958,30 +964,35 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                   type="text"
                   value={editingDriver.appVersion}
                   onChange={(e) => setEditingDriver({ ...editingDriver, appVersion: e.target.value })}
+                  disabled={!isAdmin}
                   className="w-full px-4 py-2 text-sm border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-950 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                 />
               </div>
 
               <div className="pt-4 flex gap-3 flex-col sm:flex-row">
-                <button
-                  onClick={handleEditSave}
-                  className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
-                >
-                  <Save className="w-4 h-4" />
-                  Save Changes
-                </button>
-                <button
-                  onClick={() => {
-                    if (window.confirm("Are you sure you want to delete this driver? This cannot be undone.")) {
-                      onDeleteDriver(editingDriver.id);
-                      setIsEditModalOpen(false);
-                    }
-                  }}
-                  className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-bold hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  Delete Driver
-                </button>
+                {isAdmin && (
+                  <button
+                    onClick={handleEditSave}
+                    className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Save className="w-4 h-4" />
+                    Save Changes
+                  </button>
+                )}
+                {canDeleteDriver(editingDriver) && (
+                  <button
+                    onClick={() => {
+                      if (window.confirm("Are you sure you want to delete this driver? This cannot be undone.")) {
+                        onDeleteDriver(editingDriver.id);
+                        setIsEditModalOpen(false);
+                      }
+                    }}
+                    className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-bold hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Delete Driver
+                  </button>
+                )}
                 <button
                   onClick={() => setIsEditModalOpen(false)}
                   className="flex-1 px-4 py-2 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 rounded-lg text-sm font-bold hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"

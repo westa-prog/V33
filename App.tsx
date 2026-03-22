@@ -24,7 +24,6 @@ import {
   subscribeToEmailLogs,
   subscribeToDriverReplies,
   updateDriver as updateDriverInSupabase,
-  deleteDriver as deleteDriverFromSupabase,
   addEmailLog
 } from './services/supabaseService';
 import { sendGmailMessage, fetchGmailReplies } from './services/gmailService';
@@ -966,12 +965,22 @@ const App: React.FC = () => {
   };
 
   const handleDeleteDriver = async (id: string) => {
-    if (!isAdminUser) return;
+    const targetDriver = drivers.find((d) => d.id === id);
+    const canDelete = isAdminUser || (targetDriver?.createdBy && targetDriver.createdBy === activeUserId);
+    if (!canDelete || !activeUserId) return;
     setDrivers(prev => prev.filter(d => d.id !== id));
 
-    // Persist deletion to Supabase
-    if (activeUserId) {
-      await deleteDriverFromSupabase(activeUserId, id, driverOwnerUserId);
+    try {
+      const response = await fetch(apiUrl(`/api/drivers/${id}`), {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ acting_user_id: activeUserId })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || `Request failed (${response.status})`);
+    } catch (error: any) {
+      setDrivers(prev => targetDriver ? [targetDriver, ...prev] : prev);
+      alert(error?.message || 'Failed to delete driver.');
     }
   };
 
@@ -1081,6 +1090,7 @@ const App: React.FC = () => {
                 onManualSendEmail={handleManualSendEmail}
                 onResetDriver={handleResetDriver}
                 isAdmin={isAdminUser}
+                currentUserId={activeUserId}
                 fixedBoard={isAdminUser ? undefined : authUser?.assignedBoard}
               />
             </div>

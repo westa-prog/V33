@@ -825,6 +825,63 @@ app.post('/api/drivers/create', async (req, res) => {
     }
 });
 
+app.delete('/api/drivers/:driverId', async (req, res) => {
+    try {
+        const driverId = String(req.params.driverId || '').trim();
+        const actingUserId = String(req.body?.acting_user_id || '').trim();
+
+        if (!isUuid(driverId) || !isUuid(actingUserId)) {
+            res.status(400).json({ error: 'Valid driverId and acting_user_id are required.' });
+            return;
+        }
+
+        const supabase = getDb();
+        const { data: profile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', actingUserId)
+            .single();
+        const { data: userData } = await supabase.auth.admin.getUserById(actingUserId);
+        const meta = readUserMetadata(userData?.user);
+
+        const role = profile?.role || meta.role;
+        const profileEmail = profile?.email || userData?.user?.email;
+        const isAdmin = role === 'admin' || normalizeEmail(profileEmail) === ADMIN_EMAIL;
+
+        const { data: driver, error: driverError } = await supabase
+            .from('drivers_new')
+            .select('id,created_by')
+            .eq('id', driverId)
+            .single();
+
+        if (driverError || !driver) {
+            res.status(404).json({ error: 'Driver not found.' });
+            return;
+        }
+
+        const isCreator = String(driver.created_by || '') === actingUserId;
+        if (!isAdmin && !isCreator) {
+            res.status(403).json({ error: 'Employees can only delete drivers they created.' });
+            return;
+        }
+
+        const { error: deleteError } = await supabase
+            .from('drivers_new')
+            .delete()
+            .eq('id', driverId);
+
+        if (deleteError) {
+            res.status(500).json({ error: deleteError.message });
+            return;
+        }
+
+        res.json({ success: true });
+    } catch (e: any) {
+        console.error('[API] Driver delete failed:', e);
+        res.status(500).json({ error: e.message || 'Failed to delete driver.' });
+    }
+});
+
 app.post('/api/companies/create', async (req, res) => {
     try {
         const { acting_user_id, name, board } = req.body || {};
