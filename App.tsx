@@ -943,9 +943,12 @@ const App: React.FC = () => {
 
   const filteredDrivers = useMemo(() => {
     const sourceDrivers = accessibleDrivers;
+    const normalizedSearchQuery = searchQuery.trim().toLowerCase();
 
     return sourceDrivers.filter(driver => {
-      const matchesName = driver.name.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesName = normalizedSearchQuery === ''
+        || driver.name.toLowerCase().includes(normalizedSearchQuery)
+        || driver.email.toLowerCase().includes(normalizedSearchQuery);
       const matchesEld = eldFilter === 'ALL' || driver.eldStatus === eldFilter;
       const matchesDuty = dutyFilter === 'ALL' || driver.dutyStatus === dutyFilter;
       const matchesCompany = companyFilter === 'ALL' || normalizeCompanyLabel(driver.company) === normalizeCompanyLabel(companyFilter);

@@ -89,6 +89,16 @@ export const DriverTable: React.FC<DriverTableProps> = ({
   const [companyStatusFilter, setCompanyStatusFilter] = useState<'ALL' | 'ACTIVE' | 'ATTENTION' | 'INACTIVE'>('ALL');
   const [isSavingCompany, setIsSavingCompany] = useState(false);
 
+  const normalizeSearchText = (value?: string | null) => (value || '').trim().toLowerCase();
+
+  const matchesDriverSearch = (driver: Driver, query: string) => {
+    const normalizedQuery = normalizeSearchText(query);
+    if (!normalizedQuery) return true;
+
+    return normalizeSearchText(driver.name).includes(normalizedQuery)
+      || normalizeSearchText(driver.email).includes(normalizedQuery);
+  };
+
   const handleSendFollowUp = async (driverId: string) => {
     const confirmed = window.confirm('Send alert email now?');
     if (!confirmed) return;
@@ -184,7 +194,17 @@ export const DriverTable: React.FC<DriverTableProps> = ({
     return fixedBoard ? [fixedBoard] : ['Board A', 'Board B', 'Board C'];
   }, [allowedBoards, fixedBoard, isAdmin]);
 
-  const companyRows = useMemo(() => {
+  const openCompanyView = (companyName: string, driverSearch = '') => {
+    setSelectedCompanyName(companyName);
+    setFilters.setSearchQuery(driverSearch);
+    setFilters.setEldFilter('ALL');
+    setFilters.setDutyFilter('ALL');
+    setFilters.setBoardFilter('ALL');
+  };
+
+  const allCompanyRows = useMemo(() => {
+    const normalizedSearch = normalizeSearchText(companySearchQuery);
+
     return companyNames.map((name, index) => {
       const companyDrivers = drivers.filter((d) => d.company === name);
       const companyRecord = companies.find((c) => c.name === name);
@@ -194,6 +214,12 @@ export const DriverTable: React.FC<DriverTableProps> = ({
         d.hasPendingAlert || (d.eldStatus === ELDStatus.DISCONNECTED && (d.dutyStatus === DutyStatus.DRIVING || d.dutyStatus === DutyStatus.ON_DUTY))
       ).length;
       const status = attentionCount > 0 ? 'ATTENTION' : connectedCount > 0 ? 'ACTIVE' : 'INACTIVE';
+      const driverMatchCount = normalizedSearch
+        ? companyDrivers.filter((driver) => matchesDriverSearch(driver, normalizedSearch)).length
+        : 0;
+      const matchesSearch = !normalizedSearch
+        || normalizeSearchText(name).includes(normalizedSearch)
+        || driverMatchCount > 0;
 
       return {
         id: companyRecord?.id || name,
@@ -203,26 +229,52 @@ export const DriverTable: React.FC<DriverTableProps> = ({
         totalDrivers: companyDrivers.length,
         connectedCount,
         attentionCount,
-        status
+        status,
+        driverMatchCount,
+        matchesSearch
       };
-    }).filter((row) => {
-      const matchesSearch = row.name.toLowerCase().includes(companySearchQuery.toLowerCase());
-      const matchesStatus = companyStatusFilter === 'ALL' || row.status === companyStatusFilter;
-      return matchesSearch && matchesStatus;
     });
-  }, [companies, companyNames, companySearchQuery, companyStatusFilter, drivers]);
+  }, [companies, companyNames, companySearchQuery, drivers]);
+
+  const companyRows = useMemo(() => {
+    return allCompanyRows.filter((row) => {
+      const matchesStatus = companyStatusFilter === 'ALL' || row.status === companyStatusFilter;
+      return row.matchesSearch && matchesStatus;
+    });
+  }, [allCompanyRows, companyStatusFilter]);
 
   const selectedCompanySummary = useMemo(() => {
     if (!selectedCompanyName) return null;
-    return companyRows.find((row) => row.name === selectedCompanyName) || null;
-  }, [companyRows, selectedCompanyName]);
+    return allCompanyRows.find((row) => row.name === selectedCompanyName) || null;
+  }, [allCompanyRows, selectedCompanyName]);
+
+  const companyStatusByName = useMemo(() => {
+    return new Map(allCompanyRows.map((row) => [row.name, row.status]));
+  }, [allCompanyRows]);
+
+  const matchingDrivers = useMemo(() => {
+    const normalizedSearch = normalizeSearchText(companySearchQuery);
+    if (!normalizedSearch || selectedCompanyName) return [];
+
+    return [...drivers]
+      .filter((driver) => {
+        if (!matchesDriverSearch(driver, normalizedSearch)) return false;
+        const companyStatus = companyStatusByName.get(driver.company);
+        return companyStatusFilter === 'ALL' || companyStatus === companyStatusFilter;
+      })
+      .sort((a, b) => {
+        const nameSort = a.name.localeCompare(b.name);
+        if (nameSort !== 0) return nameSort;
+        return a.company.localeCompare(b.company);
+      });
+  }, [companySearchQuery, companyStatusByName, companyStatusFilter, drivers, selectedCompanyName]);
 
   const detailDrivers = useMemo(() => {
     if (!selectedCompanyName) return [];
     return [...drivers]
       .filter((driver) => {
         const matchesCompany = driver.company === selectedCompanyName;
-        const matchesName = driver.name.toLowerCase().includes(filters.searchQuery.toLowerCase());
+        const matchesName = matchesDriverSearch(driver, filters.searchQuery);
         const matchesBoard = filters.boardFilter === 'ALL' || driver.board === filters.boardFilter;
         const matchesEld = filters.eldFilter === 'ALL' || driver.eldStatus === filters.eldFilter;
         const matchesDuty = filters.dutyFilter === 'ALL' || driver.dutyStatus === filters.dutyFilter;
@@ -407,7 +459,7 @@ export const DriverTable: React.FC<DriverTableProps> = ({
               </div>
               <input
                 type="text"
-                placeholder="Search company..."
+                placeholder="Search companies or drivers..."
                 value={companySearchQuery}
                 onChange={(e) => setCompanySearchQuery(e.target.value)}
                 className="block w-full pl-10 pr-3 py-2 text-sm border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all shadow-sm"
@@ -443,7 +495,7 @@ export const DriverTable: React.FC<DriverTableProps> = ({
               </div>
               <input
                 type="text"
-                placeholder="Search company drivers..."
+                placeholder="Search drivers in this company..."
                 value={filters.searchQuery}
                 onChange={(e) => setFilters.setSearchQuery(e.target.value)}
                 className="block w-full pl-10 pr-3 py-2 text-sm border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all shadow-sm"
@@ -492,96 +544,151 @@ export const DriverTable: React.FC<DriverTableProps> = ({
       </div>
 
       {!selectedCompanyName ? (
-        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center gap-2">
-            <Building2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-            <h4 className="text-sm font-black text-slate-900 dark:text-white">Companies</h4>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
-              <thead className="bg-slate-50 dark:bg-slate-800/50">
-                <tr>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">No</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Name</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Board</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Drivers</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Connected</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                {companyRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="px-6 py-12 text-center text-slate-400 italic">
-                      No companies found.
-                    </td>
-                  </tr>
-                ) : companyRows.map((company) => (
-                  <tr key={company.name} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
-                    <td className="px-6 py-4 text-sm text-slate-500 dark:text-slate-400">{company.index}</td>
-                    <td className="px-6 py-4">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedCompanyName(company.name);
-                          setFilters.setSearchQuery('');
-                          setFilters.setEldFilter('ALL');
-                          setFilters.setDutyFilter('ALL');
-                          setFilters.setBoardFilter('ALL');
-                        }}
-                        className="flex items-center gap-2 text-left text-sm font-semibold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300"
-                      >
-                        <span>{company.name}</span>
-                        <ChevronRight className="w-4 h-4" />
-                      </button>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-slate-700 dark:text-slate-300">{company.board}</td>
-                    <td className="px-6 py-4">
-                      <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-bold ${
-                        company.status === 'ATTENTION'
-                          ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
-                          : company.status === 'ACTIVE'
-                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
-                            : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
-                      }`}>
-                        {company.status === 'ATTENTION' ? 'Needs Attention' : company.status === 'ACTIVE' ? 'Active' : 'Inactive'}
+        <div className="space-y-4">
+          {companySearchQuery.trim() !== '' && matchingDrivers.length > 0 && (
+            <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Users className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                  <h4 className="text-sm font-black text-slate-900 dark:text-white">Driver Matches</h4>
+                </div>
+                <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                  {matchingDrivers.length} result{matchingDrivers.length === 1 ? '' : 's'}
+                </span>
+              </div>
+
+              <div className="divide-y divide-slate-200 dark:divide-slate-800">
+                {matchingDrivers.slice(0, 8).map((driver) => (
+                  <button
+                    key={driver.id}
+                    type="button"
+                    onClick={() => openCompanyView(driver.company, companySearchQuery)}
+                    className="w-full px-5 py-4 flex flex-col gap-3 text-left hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors md:flex-row md:items-center md:justify-between"
+                  >
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900 dark:text-white">{driver.name}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{driver.email}</p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-bold bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                        {driver.company}
                       </span>
-                    </td>
-                    <td className="px-6 py-4 text-sm font-semibold text-slate-900 dark:text-white">{company.totalDrivers}</td>
-                    <td className="px-6 py-4 text-sm text-slate-700 dark:text-slate-300">{company.connectedCount}</td>
-                    <td className="px-6 py-4">
-                      <DropdownMenu
-                        menuClassName="w-64"
-                        options={[
-                          ...boards.map((board) => ({
-                            label: company.board === board ? `Current Board: ${board}` : `Move to ${board}`,
-                            onClick: () => handleSaveCompany(company.id, company.name, board),
-                            Icon: company.board === board
-                              ? <CheckIcon className="h-4 w-4 text-emerald-300" />
-                              : <PenSquare className="h-4 w-4" />
-                          })),
-                          {
-                            label: isSavingCompany ? 'Saving...' : `Delete ${company.name}`,
-                            onClick: () => {
-                              if (!isSavingCompany) {
-                                void handleRemoveCompany(company.id, company.name);
-                              }
-                            },
-                            Icon: <Trash className="h-4 w-4 text-rose-300" />
-                          }
-                        ]}
-                      >
-                        <span className="inline-flex items-center gap-2">
-                          <PenSquare className="w-4 h-4" />
-                          Actions
-                        </span>
-                      </DropdownMenu>
-                    </td>
-                  </tr>
+                      <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">
+                        {driver.board}
+                      </span>
+                      <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-bold ${
+                        driver.eldStatus === ELDStatus.DISCONNECTED
+                          ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+                          : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+                      }`}>
+                        {driver.eldStatus || ELDStatus.CONNECTED}
+                      </span>
+                    </div>
+                  </button>
                 ))}
-              </tbody>
-            </table>
+
+                {matchingDrivers.length > 8 && (
+                  <div className="px-5 py-3 text-xs text-slate-500 dark:text-slate-400 bg-slate-50/80 dark:bg-slate-950/40">
+                    Showing the first 8 driver matches. Open a company to refine the list further.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+              <h4 className="text-sm font-black text-slate-900 dark:text-white">Companies</h4>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
+                <thead className="bg-slate-50 dark:bg-slate-800/50">
+                  <tr>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">No</th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Name</th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Board</th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Status</th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Drivers</th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Connected</th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                  {companyRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="px-6 py-12 text-center text-slate-400 italic">
+                        No companies found.
+                      </td>
+                    </tr>
+                  ) : companyRows.map((company) => (
+                    <tr key={company.name} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                      <td className="px-6 py-4 text-sm text-slate-500 dark:text-slate-400">{company.index}</td>
+                      <td className="px-6 py-4">
+                        <button
+                          type="button"
+                          onClick={() => openCompanyView(company.name, company.driverMatchCount > 0 ? companySearchQuery : '')}
+                          className="flex flex-col items-start gap-1 text-left"
+                        >
+                          <span className="inline-flex items-center gap-2 text-sm font-semibold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300">
+                            <span>{company.name}</span>
+                            <ChevronRight className="w-4 h-4" />
+                          </span>
+                          {companySearchQuery.trim() !== '' && company.driverMatchCount > 0 && (
+                            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">
+                              {company.driverMatchCount} driver match{company.driverMatchCount === 1 ? '' : 'es'}
+                            </span>
+                          )}
+                        </button>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-slate-700 dark:text-slate-300">{company.board}</td>
+                      <td className="px-6 py-4">
+                        <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-bold ${
+                          company.status === 'ATTENTION'
+                            ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+                            : company.status === 'ACTIVE'
+                              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+                              : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                        }`}>
+                          {company.status === 'ATTENTION' ? 'Needs Attention' : company.status === 'ACTIVE' ? 'Active' : 'Inactive'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-sm font-semibold text-slate-900 dark:text-white">{company.totalDrivers}</td>
+                      <td className="px-6 py-4 text-sm text-slate-700 dark:text-slate-300">{company.connectedCount}</td>
+                      <td className="px-6 py-4">
+                        <DropdownMenu
+                          menuClassName="w-64"
+                          options={[
+                            ...boards.map((board) => ({
+                              label: company.board === board ? `Current Board: ${board}` : `Move to ${board}`,
+                              onClick: () => handleSaveCompany(company.id, company.name, board),
+                              Icon: company.board === board
+                                ? <CheckIcon className="h-4 w-4 text-emerald-300" />
+                                : <PenSquare className="h-4 w-4" />
+                            })),
+                            {
+                              label: isSavingCompany ? 'Saving...' : `Delete ${company.name}`,
+                              onClick: () => {
+                                if (!isSavingCompany) {
+                                  void handleRemoveCompany(company.id, company.name);
+                                }
+                              },
+                              Icon: <Trash className="h-4 w-4 text-rose-300" />
+                            }
+                          ]}
+                        >
+                          <span className="inline-flex items-center gap-2">
+                            <PenSquare className="w-4 h-4" />
+                            Actions
+                          </span>
+                        </DropdownMenu>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       ) : (
