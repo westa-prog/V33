@@ -10,10 +10,12 @@ interface DashboardProps {
     drivers: Driver[];
     assignedBoard?: string;
     employeeName?: string;
+    profileName?: string;
+    profilePicture?: string;
     realtimeHealth?: Record<string, RealtimeChannelHealth>;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, employeeName, realtimeHealth }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, employeeName, profileName, profilePicture, realtimeHealth }) => {
     const rawApiBaseUrl = ((import.meta as any).env.VITE_API_URL || '').trim();
     const apiBaseUrl = rawApiBaseUrl.replace(/\/+$/, '');
     const isBrowser = typeof window !== 'undefined';
@@ -122,9 +124,37 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, em
         if (!status) return 'IDLE';
         return status.replace(/_/g, ' ');
     };
+    const displayName = profileName || employeeName || 'User';
+    const profileInitial = displayName.trim().charAt(0).toUpperCase() || 'U';
 
     return (
         <div className="space-y-6 animate-in fade-in zoom-in-95 duration-200">
+            {(profilePicture || profileName || employeeName) && (
+                <section className="rounded-2xl border border-slate-200 bg-white/90 p-5 shadow-sm backdrop-blur-md dark:border-slate-800 dark:bg-slate-900/80">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                        {profilePicture ? (
+                            <img
+                                src={profilePicture}
+                                alt={`${displayName} profile`}
+                                className="h-16 w-16 rounded-2xl object-cover ring-2 ring-indigo-100 dark:ring-indigo-900/60"
+                            />
+                        ) : (
+                            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-100 text-xl font-black text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-200">
+                                {profileInitial}
+                            </div>
+                        )}
+
+                        <div className="min-w-0">
+                            <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">Profile</p>
+                            <h2 className="truncate text-2xl font-black text-slate-900 dark:text-white">{displayName}</h2>
+                            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                                {assignedBoard ? `${assignedBoard} dashboard view` : 'Live fleet dashboard'}
+                            </p>
+                        </div>
+                    </div>
+                </section>
+            )}
+
             {assignedBoard && employeeName && (
                 <section className="space-y-6">
                     <HorizonHeroSection

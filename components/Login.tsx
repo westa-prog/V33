@@ -30,6 +30,9 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
       uid: signedInUser.id,
       email: signedInUser.email || email,
       name: (signedInUser.user_metadata?.full_name as string) || email.split('@')[0],
+      picture: (signedInUser.user_metadata?.picture as string)
+        || (signedInUser.user_metadata?.picture_url as string)
+        || undefined,
       role: normalizeAuthRole(signedInUser.user_metadata?.role),
       adminId: (signedInUser.user_metadata?.admin_id as string) || undefined,
       assignedBoards: Array.isArray(signedInUser.user_metadata?.assigned_boards)

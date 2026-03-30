@@ -5,6 +5,7 @@ export interface UserProfile {
     id: string;
     email: string;
     name?: string | null;
+    picture?: string | null;
     role?: string | null;
     admin_id?: string | null;
     assigned_boards?: string[] | null;
@@ -121,6 +122,7 @@ export const fetchUserProfile = async (userId: string): Promise<UserProfile | nu
         id: row.id,
         email: row.email,
         name: row.name,
+        picture: row.picture_url || null,
         role: row.role,
         admin_id: row.admin_id,
         assigned_boards: boards,

@@ -101,6 +101,27 @@ const readUserMetadata = (user: any) => {
 const normalizeEmail = (value: unknown) => String(value || '').trim().toLowerCase();
 const normalizeCompanyName = (value: unknown) => String(value || '').trim().replace(/\s+/g, ' ');
 const normalizeCompanyList = (value: string[]) => value.map((item) => normalizeCompanyName(item).toLowerCase()).filter(Boolean);
+const MAX_PROFILE_PICTURE_LENGTH = 400_000;
+const pickProfilePicture = (value: unknown): string | null | undefined => {
+    if (typeof value !== 'string') return undefined;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (!/^data:image\/(png|jpe?g|webp);base64,/i.test(trimmed)) {
+        throw new Error('Profile image must be a PNG, JPG, or WEBP.');
+    }
+    if (trimmed.length > MAX_PROFILE_PICTURE_LENGTH) {
+        throw new Error('Profile image is too large. Please upload a smaller image.');
+    }
+    return trimmed;
+};
+const readUserPicture = (user: any): string | null => {
+    const meta = user?.user_metadata || {};
+    const candidates = [meta.picture, meta.picture_url, meta.avatar_url];
+    for (const candidate of candidates) {
+        if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+    }
+    return null;
+};
 const DRIVER_FOLLOW_UP = {
     ACTION_REQUIRED: 'Action required',
     CONNECT: 'Connect',
@@ -117,10 +138,13 @@ const normalizeRole = (value: unknown): 'admin' | 'employee' => {
     return role === 'admin' ? 'admin' : 'employee';
 };
 const isProfileSchemaMismatch = (message: string) => {
-    return /assigned_boards|assigned_board|assigned_companies|admin_id|board_id|company_id/i.test(message || '');
+    return /assigned_boards|assigned_board|assigned_companies|admin_id|board_id|company_id|picture_url/i.test(message || '');
 };
 const isMissingEmployeeAssignmentsTable = (message: string) => {
     return /employee_assignments|relation .* does not exist|Could not find the table/i.test(message || '');
+};
+const isMissingColumn = (message: string, columnName: string) => {
+    return new RegExp(`column.*${columnName}|Could not find the '${columnName}' column|schema cache`, 'i').test(message || '');
 };
 const deriveDriverSyncState = (input: {
     eldStatus?: string | null;
@@ -176,6 +200,7 @@ const upsertProfileAssignments = async (
         admin_id?: string | null;
         assigned_boards?: string[];
         assigned_companies?: string[];
+        picture_url?: string | null;
     }
 ) => {
     const primaryBoardId = boardNameToId(payload.assigned_boards?.[0] || null);
@@ -187,7 +212,8 @@ const upsertProfileAssignments = async (
         role: payload.role,
         assigned_boards: payload.assigned_boards || [],
         assigned_companies: payload.assigned_companies || [],
-        board_id: primaryBoardId
+        board_id: primaryBoardId,
+        picture_url: payload.picture_url ?? null
     }, { onConflict: 'id' });
 
     if (error && isProfileSchemaMismatch(String(error.message || ''))) {
@@ -221,11 +247,13 @@ const syncUserAccess = async (
         landing_html?: string;
         email_template?: string;
         email_templates?: Record<string, unknown>;
+        picture?: string | null;
     }
 ) => {
     const email = normalizeEmail(user?.email);
     const fullName = String(access.name || user?.user_metadata?.full_name || email.split('@')[0] || 'User');
     const currentMeta = user?.user_metadata || {};
+    const currentPicture = access.picture !== undefined ? access.picture : readUserPicture(user);
 
     const profileError = await upsertProfileAssignments(supabase, {
         id: user.id,
@@ -234,7 +262,8 @@ const syncUserAccess = async (
         role: access.role,
         admin_id: access.admin_id || null,
         assigned_boards: access.assigned_boards || [],
-        assigned_companies: access.assigned_companies || []
+        assigned_companies: access.assigned_companies || [],
+        picture_url: currentPicture ?? null
     });
     if (profileError && !isProfileSchemaMismatch(String(profileError.message || ''))) {
         throw profileError;
@@ -250,6 +279,8 @@ const syncUserAccess = async (
             assigned_companies: access.assigned_companies || [],
             landing_html: typeof access.landing_html === 'string' ? access.landing_html : (currentMeta.landing_html || ''),
             email_template: typeof access.email_template === 'string' ? access.email_template : (currentMeta.email_template || ''),
+            picture: currentPicture ?? null,
+            picture_url: currentPicture ?? null,
             email_templates: access.email_templates && typeof access.email_templates === 'object'
                 ? access.email_templates
                 : (currentMeta.email_templates || {})
@@ -697,7 +728,8 @@ app.post('/api/auth/ensure-profile', async (req, res) => {
             await syncUserAccess(supabase, userData.user, {
                 role: 'admin',
                 assigned_boards: [],
-                assigned_companies: []
+                assigned_companies: [],
+                picture: readUserPicture(userData.user) ?? undefined
             });
             res.json({ success: true, role: 'admin' });
             return;
@@ -709,7 +741,10 @@ app.post('/api/auth/ensure-profile', async (req, res) => {
                 role: assignmentRole,
                 admin_id: assignmentRole === 'admin' ? null : assignment.admin_id,
                 assigned_boards: assignmentRole === 'admin' ? [] : normalizeList(assignment.assigned_boards).map(normalizeBoardName).filter(Boolean),
-                assigned_companies: normalizeList(assignment.assigned_companies)
+                assigned_companies: normalizeList(assignment.assigned_companies),
+                picture: typeof assignment.picture_url === 'string' && assignment.picture_url.trim()
+                    ? assignment.picture_url.trim()
+                    : (readUserPicture(userData.user) ?? undefined)
             });
 
             await supabase
@@ -740,7 +775,8 @@ app.post('/api/auth/ensure-profile', async (req, res) => {
             assigned_boards: pickMetadataList(userData.user.user_metadata?.assigned_boards || userData.user.user_metadata?.assigned_board)
                 .map(normalizeBoardName)
                 .filter(Boolean),
-            assigned_companies: pickMetadataList(userData.user.user_metadata?.assigned_companies || userData.user.user_metadata?.assigned_company)
+            assigned_companies: pickMetadataList(userData.user.user_metadata?.assigned_companies || userData.user.user_metadata?.assigned_company),
+            picture_url: readUserPicture(userData.user) ?? null
         });
 
         if (upsertError && !isProfileSchemaMismatch(String(upsertError.message || ''))) {
@@ -761,7 +797,7 @@ app.post('/api/auth/ensure-profile', async (req, res) => {
 
 app.post('/api/admin/assign-user', async (req, res) => {
     try {
-        const { email, name, role, admin_id, assigned_boards, assigned_companies } = req.body || {};
+        const { email, name, role, admin_id, assigned_boards, assigned_companies, picture } = req.body || {};
         const normalizedEmail = normalizeEmail(email);
         const normalizedName = String(name || '').trim();
         const normalizedRole = normalizeRole(role);
@@ -770,6 +806,13 @@ app.post('/api/admin/assign-user', async (req, res) => {
             ? []
             : normalizeList(assigned_boards).map(normalizeBoardName).filter(Boolean);
         const normalizedCompanies = normalizeList(assigned_companies);
+        let normalizedPicture: string | null | undefined;
+        try {
+            normalizedPicture = pickProfilePicture(picture);
+        } catch (error: any) {
+            res.status(400).json({ error: error?.message || 'Invalid profile image.' });
+            return;
+        }
 
         if (!isValidEmail(normalizedEmail)) {
             res.status(400).json({ error: 'A valid employee email is required.' });
@@ -789,21 +832,35 @@ app.post('/api/admin/assign-user', async (req, res) => {
         const claimedUserId = authUser?.last_sign_in_at ? authUser.id : null;
         const status = claimedUserId ? 'active' : 'pending';
 
-        const { data: assignment, error: assignmentError } = await supabase
+        const assignmentPayload: Record<string, unknown> = {
+            email: normalizedEmail,
+            name: normalizedName || null,
+            admin_id: normalizedAdminId,
+            role: normalizedRole,
+            assigned_boards: normalizedBoards,
+            assigned_companies: normalizedCompanies,
+            status,
+            claimed_user_id: claimedUserId,
+            joined_at: claimedUserId ? new Date().toISOString() : null,
+            picture_url: normalizedPicture ?? null
+        };
+
+        let { data: assignment, error: assignmentError } = await supabase
             .from('employee_assignments')
-            .upsert({
-                email: normalizedEmail,
-                name: normalizedName || null,
-                admin_id: normalizedAdminId,
-                role: normalizedRole,
-                assigned_boards: normalizedBoards,
-                assigned_companies: normalizedCompanies,
-                status,
-                claimed_user_id: claimedUserId,
-                joined_at: claimedUserId ? new Date().toISOString() : null
-            }, { onConflict: 'email' })
+            .upsert(assignmentPayload, { onConflict: 'email' })
             .select('*')
             .single();
+
+        if (assignmentError && isMissingColumn(String(assignmentError.message || ''), 'picture_url')) {
+            delete assignmentPayload.picture_url;
+            const fallback = await supabase
+                .from('employee_assignments')
+                .upsert(assignmentPayload, { onConflict: 'email' })
+                .select('*')
+                .single();
+            assignment = fallback.data;
+            assignmentError = fallback.error;
+        }
 
         if (assignmentError) {
             res.status(500).json({ error: assignmentError.message });
@@ -816,7 +873,8 @@ app.post('/api/admin/assign-user', async (req, res) => {
                 role: normalizedRole,
                 admin_id: normalizedRole === 'admin' ? null : normalizedAdminId,
                 assigned_boards: normalizedBoards,
-                assigned_companies: normalizedCompanies
+                assigned_companies: normalizedCompanies,
+                picture: normalizedPicture
             });
         } else {
             const inviteOptions: {
@@ -828,7 +886,9 @@ app.post('/api/admin/assign-user', async (req, res) => {
                     role: normalizedRole,
                     admin_id: normalizedRole === 'admin' ? null : normalizedAdminId,
                     assigned_boards: normalizedBoards,
-                    assigned_companies: normalizedCompanies
+                    assigned_companies: normalizedCompanies,
+                    picture: normalizedPicture ?? null,
+                    picture_url: normalizedPicture ?? null
                 }
             };
             if (APP_URL) {
@@ -889,6 +949,7 @@ app.get('/api/admin/assignments', async (req, res) => {
             let landingHtml = '';
             let emailTemplate = '';
             let emailTemplates: Record<string, unknown> = {};
+            let pictureUrl = typeof row.picture_url === 'string' ? row.picture_url : '';
             if (row.claimed_user_id) {
                 const { data: userData } = await supabase.auth.admin.getUserById(row.claimed_user_id);
                 joinedUserName = String(userData?.user?.user_metadata?.full_name || joinedUserName || row.email);
@@ -897,6 +958,7 @@ app.get('/api/admin/assignments', async (req, res) => {
                 emailTemplates = (userData?.user?.user_metadata?.email_templates && typeof userData.user.user_metadata.email_templates === 'object')
                     ? userData.user.user_metadata.email_templates
                     : {};
+                pictureUrl = readUserPicture(userData?.user) || pictureUrl;
             }
             mapped.push({
                 id: row.id,
@@ -912,7 +974,8 @@ app.get('/api/admin/assignments', async (req, res) => {
                 updated_at: row.updated_at,
                 landing_html: landingHtml,
                 email_template: emailTemplate,
-                email_templates: emailTemplates
+                email_templates: emailTemplates,
+                picture_url: pictureUrl || null
             });
         }
 
@@ -930,7 +993,7 @@ app.get('/api/admin/assignments', async (req, res) => {
 app.patch('/api/admin/assignments/:assignmentId', async (req, res) => {
     try {
         const assignmentId = String(req.params.assignmentId || '').trim();
-        const { admin_id, name, role, assigned_boards, assigned_companies, landing_html, email_template, email_templates } = req.body || {};
+        const { admin_id, name, role, assigned_boards, assigned_companies, landing_html, email_template, email_templates, picture } = req.body || {};
         const normalizedAdminId = String(admin_id || '').trim();
         const normalizedName = String(name || '').trim();
         const normalizedRole = normalizeRole(role);
@@ -938,6 +1001,13 @@ app.patch('/api/admin/assignments/:assignmentId', async (req, res) => {
             ? []
             : normalizeList(assigned_boards).map(normalizeBoardName).filter(Boolean);
         const normalizedCompanies = normalizeList(assigned_companies);
+        let normalizedPicture: string | null | undefined;
+        try {
+            normalizedPicture = pickProfilePicture(picture);
+        } catch (error: any) {
+            res.status(400).json({ error: error?.message || 'Invalid profile image.' });
+            return;
+        }
 
         if (!isUuid(assignmentId) || !isUuid(normalizedAdminId)) {
             res.status(400).json({ error: 'Valid assignmentId and admin_id are required.' });
@@ -965,17 +1035,34 @@ app.patch('/api/admin/assignments/:assignmentId', async (req, res) => {
             return;
         }
 
-        const { data: assignment, error: updateError } = await supabase
+        const assignmentPayload: Record<string, unknown> = {
+            name: normalizedName || existing.name || null,
+            role: normalizedRole,
+            assigned_boards: normalizedBoards,
+            assigned_companies: normalizedCompanies
+        };
+        if (normalizedPicture !== undefined) {
+            assignmentPayload.picture_url = normalizedPicture;
+        }
+
+        let { data: assignment, error: updateError } = await supabase
             .from('employee_assignments')
-            .update({
-                name: normalizedName || existing.name || null,
-                role: normalizedRole,
-                assigned_boards: normalizedBoards,
-                assigned_companies: normalizedCompanies
-            })
+            .update(assignmentPayload)
             .eq('id', assignmentId)
             .select('*')
             .single();
+
+        if (updateError && normalizedPicture !== undefined && isMissingColumn(String(updateError.message || ''), 'picture_url')) {
+            delete assignmentPayload.picture_url;
+            const fallback = await supabase
+                .from('employee_assignments')
+                .update(assignmentPayload)
+                .eq('id', assignmentId)
+                .select('*')
+                .single();
+            assignment = fallback.data;
+            updateError = fallback.error;
+        }
 
         if (updateError || !assignment) {
             res.status(500).json({ error: updateError?.message || 'Failed to update assignment.' });
@@ -997,7 +1084,8 @@ app.patch('/api/admin/assignments/:assignmentId', async (req, res) => {
                 assigned_companies: normalizedCompanies,
                 landing_html: typeof landing_html === 'string' ? landing_html : undefined,
                 email_template: typeof email_template === 'string' ? email_template : undefined,
-                email_templates: email_templates && typeof email_templates === 'object' ? email_templates : undefined
+                email_templates: email_templates && typeof email_templates === 'object' ? email_templates : undefined,
+                picture: normalizedPicture !== undefined ? normalizedPicture : readUserPicture(userData.user)
             });
         }
 

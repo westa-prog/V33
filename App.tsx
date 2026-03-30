@@ -87,6 +87,15 @@ const normalizeAuthRole = (value: unknown): AuthUser['role'] => {
   if (role === 'admin' || role === 'employee' || role === 'user') return role;
   return undefined;
 };
+const extractProfilePicture = (source: any): string | undefined => {
+  if (!source) return undefined;
+  const meta = source.user_metadata || source;
+  const candidates = [meta.picture, meta.picture_url, meta.avatar_url];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+  }
+  return undefined;
+};
 const renderEmailTemplate = (
   template: string,
   driver: Driver,
@@ -382,6 +391,7 @@ const App: React.FC = () => {
         : (currentUser.user_metadata?.assigned_company ? [currentUser.user_metadata.assigned_company] : prev.assignedCompanies),
       landingHtml: (currentUser.user_metadata?.landing_html as string) || prev.landingHtml,
       emailTemplate: (currentUser.user_metadata?.email_template as string) || prev.emailTemplate,
+      picture: extractProfilePicture(currentUser) || prev.picture,
       emailTemplates: typeof currentUser.user_metadata?.email_templates === 'object' && currentUser.user_metadata?.email_templates
         ? (currentUser.user_metadata.email_templates as EmailTemplateMap)
         : prev.emailTemplates
@@ -581,6 +591,7 @@ const App: React.FC = () => {
           ? sessionUser.user_metadata.assigned_companies
           : (sessionUser.user_metadata?.assigned_company ? [sessionUser.user_metadata.assigned_company] : prev?.assignedCompanies),
         emailTemplate: (sessionUser.user_metadata?.email_template as string) || prev?.emailTemplate,
+        picture: extractProfilePicture(sessionUser) || prev?.picture,
         emailTemplates: typeof sessionUser.user_metadata?.email_templates === 'object' && sessionUser.user_metadata?.email_templates
           ? (sessionUser.user_metadata.email_templates as EmailTemplateMap)
           : prev?.emailTemplates
@@ -613,6 +624,7 @@ const App: React.FC = () => {
           ? sessionUser.user_metadata.assigned_companies
           : (sessionUser.user_metadata?.assigned_company ? [sessionUser.user_metadata.assigned_company] : prev?.assignedCompanies),
         emailTemplate: (sessionUser.user_metadata?.email_template as string) || prev?.emailTemplate,
+        picture: extractProfilePicture(sessionUser) || prev?.picture,
         emailTemplates: typeof sessionUser.user_metadata?.email_templates === 'object' && sessionUser.user_metadata?.email_templates
           ? (sessionUser.user_metadata.email_templates as EmailTemplateMap)
           : prev?.emailTemplates
@@ -715,7 +727,8 @@ const App: React.FC = () => {
               : (prev.assignedBoard ? normalizeBoard(prev.assignedBoard) : undefined),
             assignedCompanies: profile.assigned_companies ?? [],
             name: profile.name || prev.name,
-            email: profile.email || prev.email
+            email: profile.email || prev.email,
+            picture: profile.picture || prev.picture
           } : prev);
         }
 
@@ -838,7 +851,8 @@ const App: React.FC = () => {
         assignedBoard: profileBoards.length > 0 ? normalizeBoard(profileBoards[0]) : undefined,
         assignedCompanies: profile.assigned_companies ?? [],
         name: profile.name || prev.name,
-        email: profile.email || prev.email
+        email: profile.email || prev.email,
+        picture: profile.picture || prev.picture
       } : prev);
       syncAuthMetadataFromCurrentUser().catch((error) => {
         console.warn('Failed to refresh auth metadata after profile update:', error);
@@ -892,7 +906,16 @@ const App: React.FC = () => {
         };
 
         setUser(googleUser);
-        setAuthUser(prev => ({ ...prev, email: data.email, name: data.name, picture: data.picture }));
+        setAuthUser(prev => prev ? ({
+          ...prev,
+          email: prev.email || data.email,
+          name: prev.name || data.name,
+          picture: prev.picture || data.picture
+        }) : ({
+          email: data.email,
+          name: data.name,
+          picture: data.picture
+        }));
         setIsLiveMode(true);
         alert("Success: Google API Connected and Live Mode Enabled!");
       } catch (error) {
@@ -1491,8 +1514,8 @@ const App: React.FC = () => {
           lastSync={lastSync}
           isLiveMode={isLiveMode}
           onToggleLiveMode={setIsLiveMode}
-          profileName={user?.name || authUser?.name}
-          profilePicture={user?.picture || authUser?.picture}
+          profileName={authUser?.name || user?.name}
+          profilePicture={authUser?.picture || user?.picture}
         />
       )}
       
@@ -1510,7 +1533,16 @@ const App: React.FC = () => {
           )}
         </header>
 
-        {activeTab === 'Dashboard' && <Dashboard drivers={accessibleDrivers} assignedBoard={fixedEmployeeBoard} employeeName={isAdminUser ? undefined : authUser?.name} realtimeHealth={realtimeHealth} />}
+        {activeTab === 'Dashboard' && (
+          <Dashboard
+            drivers={accessibleDrivers}
+            assignedBoard={fixedEmployeeBoard}
+            employeeName={isAdminUser ? undefined : authUser?.name}
+            profileName={authUser?.name || user?.name}
+            profilePicture={authUser?.picture || user?.picture}
+            realtimeHealth={realtimeHealth}
+          />
+        )}
 
         {activeTab === 'Connection' && (
           <div className="space-y-8">
