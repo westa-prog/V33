@@ -5,6 +5,7 @@ import { Mail, RefreshCw, Server } from 'lucide-react';
 import axios from 'axios';
 import { HorizonHeroSection } from './ui/horizon-hero-section';
 import { supabaseConfigDiagnostics } from '../supabase';
+import { LandingContent } from './LandingContent';
 
 interface DashboardProps {
     drivers: Driver[];
@@ -12,10 +13,11 @@ interface DashboardProps {
     employeeName?: string;
     profileName?: string;
     profilePicture?: string;
+    landingHtml?: string;
     realtimeHealth?: Record<string, RealtimeChannelHealth>;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, employeeName, profileName, profilePicture, realtimeHealth }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, employeeName, profileName, profilePicture, landingHtml, realtimeHealth }) => {
     const rawApiBaseUrl = ((import.meta as any).env.VITE_API_URL || '').trim();
     const apiBaseUrl = rawApiBaseUrl.replace(/\/+$/, '');
     const isBrowser = typeof window !== 'undefined';
@@ -173,6 +175,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ drivers, assignedBoard, em
                         appraisals={motivationalCopy}
                     />
                 </section>
+            )}
+
+            {employeeName && landingHtml?.trim() && (
+                <LandingContent
+                    html={landingHtml}
+                    title="From Your Admin"
+                    subtitle={assignedBoard
+                        ? 'Images, videos, and notes added for your assigned board.'
+                        : 'Images, videos, and notes added for your employee dashboard.'}
+                />
             )}
 
             <div className="flex justify-between items-center bg-white dark:bg-slate-900 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800">

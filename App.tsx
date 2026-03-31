@@ -590,6 +590,7 @@ const App: React.FC = () => {
         assignedCompanies: Array.isArray(sessionUser.user_metadata?.assigned_companies)
           ? sessionUser.user_metadata.assigned_companies
           : (sessionUser.user_metadata?.assigned_company ? [sessionUser.user_metadata.assigned_company] : prev?.assignedCompanies),
+        landingHtml: (sessionUser.user_metadata?.landing_html as string) || prev?.landingHtml,
         emailTemplate: (sessionUser.user_metadata?.email_template as string) || prev?.emailTemplate,
         picture: extractProfilePicture(sessionUser) || prev?.picture,
         emailTemplates: typeof sessionUser.user_metadata?.email_templates === 'object' && sessionUser.user_metadata?.email_templates
@@ -623,6 +624,7 @@ const App: React.FC = () => {
         assignedCompanies: Array.isArray(sessionUser.user_metadata?.assigned_companies)
           ? sessionUser.user_metadata.assigned_companies
           : (sessionUser.user_metadata?.assigned_company ? [sessionUser.user_metadata.assigned_company] : prev?.assignedCompanies),
+        landingHtml: (sessionUser.user_metadata?.landing_html as string) || prev?.landingHtml,
         emailTemplate: (sessionUser.user_metadata?.email_template as string) || prev?.emailTemplate,
         picture: extractProfilePicture(sessionUser) || prev?.picture,
         emailTemplates: typeof sessionUser.user_metadata?.email_templates === 'object' && sessionUser.user_metadata?.email_templates
@@ -1540,6 +1542,7 @@ const App: React.FC = () => {
             employeeName={isAdminUser ? undefined : authUser?.name}
             profileName={authUser?.name || user?.name}
             profilePicture={authUser?.picture || user?.picture}
+            landingHtml={authUser?.landingHtml}
             realtimeHealth={realtimeHealth}
           />
         )}

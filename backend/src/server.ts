@@ -24,6 +24,10 @@ const uploadDir = path.join(__dirname, '../../uploads');
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
 }
+const landingMediaDir = path.join(uploadDir, 'landing-media');
+if (!fs.existsSync(landingMediaDir)) {
+    fs.mkdirSync(landingMediaDir, { recursive: true });
+}
 
 const upload = multer({
     dest: uploadDir,
@@ -368,6 +372,31 @@ const cleanupUploads = (files: Express.Multer.File[] = []) => {
         }
     }
 };
+const sanitizeUploadBaseName = (value: string) => value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48) || 'asset';
+const getUploadExtension = (file: Express.Multer.File) => {
+    const originalExt = path.extname(file.originalname || '').toLowerCase();
+    if (originalExt) return originalExt;
+    if (/^image\/png$/i.test(file.mimetype)) return '.png';
+    if (/^image\/webp$/i.test(file.mimetype)) return '.webp';
+    if (/^image\/gif$/i.test(file.mimetype)) return '.gif';
+    if (/^image\/avif$/i.test(file.mimetype)) return '.avif';
+    if (/^video\/webm$/i.test(file.mimetype)) return '.webm';
+    if (/^video\/ogg$/i.test(file.mimetype)) return '.ogv';
+    if (/^video\/quicktime$/i.test(file.mimetype)) return '.mov';
+    return '.jpg';
+};
+const isLandingMediaUpload = (file: Express.Multer.File) => (
+    /^image\/(png|jpe?g|webp|gif|avif)$/i.test(file.mimetype)
+    || /^video\/(mp4|webm|ogg|quicktime)$/i.test(file.mimetype)
+);
+const getPublicBaseUrl = (req: express.Request) => {
+    if (APP_URL) return APP_URL;
+    return `${req.protocol}://${req.get('host')}`;
+};
 
 const findCompanyByNameAndBoard = async (
     supabase: ReturnType<typeof getDb>,
@@ -689,6 +718,48 @@ app.post('/api/email/test-send', requireAdminAuth, async (req, res) => {
     } catch (e: any) {
         console.error('[API] Email test-send failed:', e);
         res.status(500).json({ error: e.message || 'Failed to send test email.' });
+    }
+});
+
+app.post('/api/admin/landing-media', requireAdminAuth, upload.single('file'), async (req, res) => {
+    const file = req.file;
+
+    try {
+        if (!file) {
+            res.status(400).json({ error: 'A media file is required.' });
+            return;
+        }
+
+        if (!isLandingMediaUpload(file)) {
+            cleanupUploads([file]);
+            res.status(400).json({ error: 'Only PNG, JPG, WEBP, GIF, AVIF, MP4, WEBM, OGG, or MOV files are allowed.' });
+            return;
+        }
+
+        const fileStem = sanitizeUploadBaseName(path.parse(file.originalname || 'asset').name);
+        const extension = getUploadExtension(file);
+        const storedFileName = `${Date.now()}-${crypto.randomUUID()}-${fileStem}${extension}`;
+        const targetPath = path.join(landingMediaDir, storedFileName);
+
+        await fs.promises.rename(file.path, targetPath);
+
+        const publicPath = `/uploads/landing-media/${storedFileName}`;
+        const mediaType = file.mimetype.startsWith('video/') ? 'video' : 'image';
+
+        res.json({
+            success: true,
+            mediaType,
+            fileName: storedFileName,
+            originalName: file.originalname,
+            url: `${getPublicBaseUrl(req)}${publicPath}`,
+            path: publicPath
+        });
+    } catch (e: any) {
+        if (file && fs.existsSync(file.path)) {
+            cleanupUploads([file]);
+        }
+        console.error('[API] Landing media upload failed:', e);
+        res.status(500).json({ error: e.message || 'Failed to upload landing media.' });
     }
 });
 
@@ -2165,6 +2236,8 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
     console.error('[SERVER] Unhandled error:', err);
     res.status(500).json({ error: 'Internal server error.' });
 });
+
+app.use('/uploads', express.static(uploadDir));
 
 if (fs.existsSync(frontendIndexPath)) {
     app.use(express.static(frontendDistPath));

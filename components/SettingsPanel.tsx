@@ -4,6 +4,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { AuthUser, Driver, DutyStatus, ELDStatus, EmailLogEntry, EmailTemplateMap } from '../types';
 import { supabase } from '../supabase';
+import { LandingContent } from './LandingContent';
 
 interface SettingsPanelProps {
   currentUser: AuthUser;
@@ -21,8 +22,36 @@ type EmployeeRecord = {
   assigned_boards?: string[];
   status?: 'pending' | 'active';
   claimed_user_id?: string | null;
+  landing_html?: string;
   email_template?: string;
   email_templates?: EmailTemplateMap;
+};
+
+const escapeHtml = (value: string) => value
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
+const buildLandingMediaSnippet = (payload: { url: string; mediaType: 'image' | 'video'; label: string }) => {
+  const safeUrl = escapeHtml(payload.url);
+  const safeLabel = escapeHtml(payload.label || 'Media');
+  if (payload.mediaType === 'video') {
+    return [
+      '<figure>',
+      `  <video controls playsinline preload="metadata" src="${safeUrl}"></video>`,
+      `  <figcaption>${safeLabel}</figcaption>`,
+      '</figure>'
+    ].join('\n');
+  }
+
+  return [
+    '<figure>',
+    `  <img src="${safeUrl}" alt="${safeLabel}" />`,
+    `  <figcaption>${safeLabel}</figcaption>`,
+    '</figure>'
+  ].join('\n');
 };
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({ currentUser, isAdmin, theme, setTheme, emailLogs, drivers }) => {
@@ -39,8 +68,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ currentUser, isAdm
     pf_3_day: '',
     pf_5_day: ''
   });
+  const [landingHtmlDraft, setLandingHtmlDraft] = useState('');
   const [activeTemplateKey, setActiveTemplateKey] = useState<keyof EmailTemplateMap>('connection_driving');
   const [saving, setSaving] = useState(false);
+  const [uploadingLandingMedia, setUploadingLandingMedia] = useState(false);
   const [message, setMessage] = useState<string>('');
   const [emailDiagnostics, setEmailDiagnostics] = useState<{
     emailMode?: string;
@@ -363,6 +394,50 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ currentUser, isAdm
     });
   }, [selectedEmployeeId, selectedEmployee?.email_template, selectedEmployee?.email_templates]);
 
+  useEffect(() => {
+    setLandingHtmlDraft(selectedEmployee?.landing_html || '');
+  }, [selectedEmployeeId, selectedEmployee?.landing_html]);
+
+  const uploadLandingMedia = async (file?: File | null) => {
+    if (!file) return;
+    if (!selectedEmployeeId) {
+      setMessage('Select an employee before uploading landing media.');
+      return;
+    }
+    if (!selectedEmployee?.claimed_user_id) {
+      setMessage('This user must sign in once before landing media can be saved.');
+      return;
+    }
+
+    setUploadingLandingMedia(true);
+    setMessage('');
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch(apiUrl('/api/admin/landing-media'), {
+        method: 'POST',
+        headers: await getAuthHeaders(),
+        body: formData
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+
+      const snippet = buildLandingMediaSnippet({
+        url: String(data?.url || ''),
+        mediaType: data?.mediaType === 'video' ? 'video' : 'image',
+        label: file.name.replace(/\.[^.]+$/, '')
+      });
+
+      setLandingHtmlDraft((prev) => prev.trim() ? `${prev.trim()}\n\n${snippet}` : snippet);
+      setMessage(`${file.name} uploaded. Save personalization to publish it on the employee page.`);
+    } catch (e: any) {
+      setMessage(e.message || 'Failed to upload landing media.');
+    } finally {
+      setUploadingLandingMedia(false);
+    }
+  };
+
   const savePersonalization = async () => {
     if (!isAdmin || !currentUser.uid || !selectedEmployeeId) return;
     if (!selectedEmployee?.claimed_user_id) {
@@ -374,11 +449,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ currentUser, isAdm
     try {
       const res = await fetch(apiUrl(`/api/admin/assignments/${selectedEmployeeId}`), {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await getAuthHeaders(true),
         body: JSON.stringify({
           admin_id: currentUser.uid,
           assigned_boards: selectedEmployee?.assigned_boards || [],
           assigned_companies: [],
+          landing_html: landingHtmlDraft,
           email_template: emailTemplatesDraft.connection_onduty || selectedEmployee?.email_template || '',
           email_templates: emailTemplatesDraft
         })
@@ -539,6 +615,63 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ currentUser, isAdm
                     This assignment is still pending. The user must sign in once before landing pages and templates can be saved.
                   </p>
                 )}
+
+                <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/40">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500">Employee Landing Page</label>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      Add notes, images, or videos for the employee dashboard. Uploaded media is inserted into the editor as HTML.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center">
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif,image/avif,video/mp4,video/webm,video/ogg,video/quicktime"
+                      disabled={uploadingLandingMedia || !selectedEmployee?.claimed_user_id}
+                      onChange={(e) => {
+                        void uploadLandingMedia(e.target.files?.[0]);
+                        e.currentTarget.value = '';
+                      }}
+                      className="block w-full text-sm text-slate-600 file:mr-4 file:rounded-lg file:border-0 file:bg-indigo-600 file:px-4 file:py-2 file:font-bold file:text-white hover:file:bg-indigo-700 disabled:opacity-50 dark:text-slate-300"
+                    />
+                    <button
+                      type="button"
+                      disabled={!selectedEmployee?.claimed_user_id}
+                      onClick={() => setLandingHtmlDraft((prev) => prev.trim()
+                        ? `${prev.trim()}\n\n<h3>Team Update</h3>\n<p>Add a note here for this employee.</p>`
+                        : '<h3>Team Update</h3>\n<p>Add a note here for this employee.</p>')}
+                      className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-bold text-slate-700 hover:bg-white disabled:opacity-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-900"
+                    >
+                      Insert Text Block
+                    </button>
+                  </div>
+
+                  {uploadingLandingMedia && (
+                    <p className="text-xs font-semibold text-indigo-600 dark:text-indigo-300">Uploading media...</p>
+                  )}
+
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500">Landing HTML</label>
+                    <textarea
+                      value={landingHtmlDraft}
+                      onChange={(e) => setLandingHtmlDraft(e.target.value)}
+                      rows={10}
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm dark:border-slate-700 dark:bg-slate-900"
+                      placeholder={'<h3>Welcome</h3>\n<p>Add text, images, or videos for this employee.</p>'}
+                    />
+                    <p className="mt-2 text-xs text-slate-500">
+                      Supported examples: {'<p>'}, {'<h3>'}, {'<img src=\"...\" />'}, {'<video controls src=\"...\"></video>'}
+                    </p>
+                  </div>
+
+                  <LandingContent
+                    html={landingHtmlDraft}
+                    title="Preview"
+                    subtitle="This is how the employee section will appear on the dashboard."
+                    compact
+                  />
+                </div>
 
                 <div>
                   <label className="text-xs font-semibold text-slate-500">Email Template Menu</label>
