@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { UserPlus, Shield, X, Check, Loader2 } from 'lucide-react';
+import { UserPlus, Shield, X, Check, Loader2, AlertTriangle } from 'lucide-react';
 import { AuthUser } from '../types';
 
 interface AdminPanelProps {
@@ -85,7 +85,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
   const [loading, setLoading] = useState(false);
   const [assignmentsLoading, setAssignmentsLoading] = useState(false);
   const [savingAssignmentId, setSavingAssignmentId] = useState<string | null>(null);
-  const [message, setMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
+  const [message, setMessage] = useState<{ type: 'error' | 'success' | 'warning'; text: string } | null>(null);
   const [boardDrafts, setBoardDrafts] = useState<Record<string, string[]>>({});
   const [nameDrafts, setNameDrafts] = useState<Record<string, string>>({});
   const [roleDrafts, setRoleDrafts] = useState<Record<string, 'employee' | 'admin'>>({});
@@ -199,7 +199,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
 
-      setMessage({ type: 'success', text: data?.message || 'User access assigned successfully.' });
+      setMessage({
+        type: data?.inviteEmailSent === false ? 'warning' : 'success',
+        text: data?.message || 'User access assigned successfully.'
+      });
       setEmail('');
       setName('');
       setRole('employee');
@@ -255,13 +258,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
           </div>
           <div>
             <h2 className="text-xl font-bold text-slate-800 dark:text-white">Assign Real User Access</h2>
-            <p className="text-sm text-slate-500">Assign boards to a real email. Access is claimed automatically after the user signs in.</p>
+            <p className="text-sm text-slate-500">Assign boards to a real email. Access is claimed automatically after the user signs in or signs up with that email.</p>
           </div>
         </div>
 
         {message && (
-          <div className={`p-4 mb-6 rounded-lg flex items-center gap-2 ${message.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-            {message.type === 'success' ? <Check className="w-5 h-5" /> : <X className="w-5 h-5" />}
+          <div className={`p-4 mb-6 rounded-lg flex items-center gap-2 ${
+            message.type === 'success'
+              ? 'bg-green-50 text-green-700'
+              : message.type === 'warning'
+                ? 'bg-amber-50 text-amber-700'
+                : 'bg-red-50 text-red-700'
+          }`}>
+            {message.type === 'success'
+              ? <Check className="w-5 h-5" />
+              : message.type === 'warning'
+                ? <AlertTriangle className="w-5 h-5" />
+                : <X className="w-5 h-5" />}
             <p className="text-sm font-medium">{message.text}</p>
           </div>
         )}
@@ -389,7 +402,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
             className="w-full flex items-center justify-center gap-2 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all disabled:opacity-50"
           >
             {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <UserPlus className="w-5 h-5" />}
-            {loading ? 'Sending Invite...' : 'Assign Access And Invite'}
+            {loading ? 'Saving Access...' : 'Assign Access'}
           </button>
         </form>
 

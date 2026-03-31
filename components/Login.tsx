@@ -12,6 +12,11 @@ const normalizeAuthRole = (value: unknown): AuthUser['role'] => {
   return undefined;
 };
 
+const getAuthRedirectTo = () => {
+  if (typeof window === 'undefined') return undefined;
+  return `${window.location.origin}${window.location.pathname}`;
+};
+
 interface LoginProps {
   onLogin: (user: AuthUser) => void;
 }
@@ -62,7 +67,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
     try {
       setIsSubmitting(true);
       setMessage('');
-      const redirectTo = window.location.origin;
+      const redirectTo = getAuthRedirectTo();
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: { redirectTo }
@@ -80,13 +85,17 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
     setMessage('');
 
     try {
+      const normalizedEmail = email.trim().toLowerCase();
+      const redirectTo = getAuthRedirectTo();
+
       if (mode === 'signup') {
         const signUpResult = await supabase.auth.signUp({
-          email,
+          email: normalizedEmail,
           password,
           options: {
+            emailRedirectTo: redirectTo,
             data: {
-              full_name: fullName.trim() || email.split('@')[0]
+              full_name: fullName.trim() || normalizedEmail.split('@')[0]
             }
           }
         });
@@ -97,13 +106,22 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
           return;
         }
 
-        setMessage('Account created. Check your email to verify, then sign in with the same assigned address.');
+        setPassword('');
+        setMessage(`Account created for ${normalizedEmail}. Check your email and click the confirmation link to return to the app and finish setup.`);
         setMode('signin');
         return;
       }
 
-      const signInResult = await supabase.auth.signInWithPassword({ email, password });
-      if (signInResult.error) throw signInResult.error;
+      const signInResult = await supabase.auth.signInWithPassword({ email: normalizedEmail, password });
+      if (signInResult.error) {
+        const authMessage = String(signInResult.error.message || '').toLowerCase();
+        if (authMessage.includes('email not confirmed')) {
+          setPassword('');
+          setMessage(`Confirm ${normalizedEmail} from the email link first, then sign in again.`);
+          return;
+        }
+        throw signInResult.error;
+      }
       onLogin(buildAuthUser(signInResult.data.user));
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Authentication failed.');

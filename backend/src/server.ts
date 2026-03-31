@@ -867,6 +867,9 @@ app.post('/api/admin/assign-user', async (req, res) => {
             return;
         }
 
+        let inviteEmailSent = false;
+        let inviteEmailError = '';
+
         if (authUser) {
             await syncUserAccess(supabase, authUser, {
                 name: normalizedName || undefined,
@@ -876,6 +879,7 @@ app.post('/api/admin/assign-user', async (req, res) => {
                 assigned_companies: normalizedCompanies,
                 picture: normalizedPicture
             });
+            inviteEmailSent = true;
         } else {
             const inviteOptions: {
                 data: Record<string, unknown>;
@@ -896,8 +900,10 @@ app.post('/api/admin/assign-user', async (req, res) => {
             }
             const { error: inviteError } = await supabase.auth.admin.inviteUserByEmail(normalizedEmail, inviteOptions);
             if (inviteError) {
-                res.status(500).json({ error: inviteError.message || 'Failed to send invite email.' });
-                return;
+                inviteEmailError = inviteError.message || 'Failed to send invite email.';
+                console.warn('[API] Supabase invite email failed; keeping assignment pending for manual signup:', inviteEmailError);
+            } else {
+                inviteEmailSent = true;
             }
         }
 
@@ -905,9 +911,13 @@ app.post('/api/admin/assign-user', async (req, res) => {
             success: true,
             assignment,
             joined: Boolean(claimedUserId),
+            inviteEmailSent,
+            inviteEmailError: inviteEmailError || null,
             message: authUser
                 ? `${normalizedEmail} already exists in auth. Access was updated${claimedUserId ? ' immediately' : ', and the invite remains pending until first sign-in'}.`
-                : `${normalizedEmail} was assigned and a Supabase invite email was sent.`
+                : inviteEmailSent
+                    ? `${normalizedEmail} was assigned and a Supabase invite email was sent.`
+                    : `${normalizedEmail} was assigned, but the invite email could not be sent. The user can still use Sign Up or Sign In with this email and access will be claimed automatically.`
         });
     } catch (e: any) {
         console.error('[API] Admin assign-user failed:', e);

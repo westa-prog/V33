@@ -33,6 +33,16 @@ Verify tables exist:
 - `ai_threads`
 - `ai_messages`
 
+Supabase Auth settings:
+
+- In `Authentication -> URL Configuration`, set `Site URL` to your deployed app URL.
+- Add your deployed app URL and local dev URL(s) to `Redirect URLs`:
+  - `https://<your-render-service>.onrender.com`
+  - `http://localhost:5173`
+  - `http://localhost:3000`
+- In `Authentication -> Providers -> Email`, enable `Confirm email` if you want Supabase to send signup confirmation emails.
+- This app uses Supabase Auth for both self-signup confirmation emails (`supabase.auth.signUp`) and admin invite emails (`supabase.auth.admin.inviteUserByEmail`).
+
 ## 3) Local Verification
 
 Install dependencies:
