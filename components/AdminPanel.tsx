@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import { UserPlus, Shield, X, Check, Loader2, AlertTriangle } from 'lucide-react';
 import { AuthUser } from '../types';
+import { supabase } from '../supabase';
+import { LandingContent } from './LandingContent';
+import { EMPTY_EMPLOYEE_SHOWCASE, EmployeeShowcaseDraft, buildEmployeeShowcaseHtml, extractEmployeeShowcaseDraft } from './employeeShowcase';
 
 interface AdminPanelProps {
   currentUser: AuthUser;
@@ -18,6 +21,7 @@ type AssignmentRecord = {
   joined_at?: string | null;
   invited_at?: string | null;
   picture_url?: string | null;
+  landing_html?: string | null;
 };
 
 const PROFILE_IMAGE_MAX_DIMENSION = 256;
@@ -91,9 +95,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
   const [roleDrafts, setRoleDrafts] = useState<Record<string, 'employee' | 'admin'>>({});
   const [newPicture, setNewPicture] = useState('');
   const [pictureDrafts, setPictureDrafts] = useState<Record<string, string>>({});
+  const [showcaseDrafts, setShowcaseDrafts] = useState<Record<string, EmployeeShowcaseDraft>>({});
   const [pictureUploadTarget, setPictureUploadTarget] = useState<string | 'new' | null>(null);
+  const [showcaseUploadTarget, setShowcaseUploadTarget] = useState<string | null>(null);
 
   const boardOptions = ['Board A', 'Board B', 'Board C'];
+  const getAuthHeaders = async (includeJson = false) => {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) throw new Error('Your session expired. Please sign in again.');
+    return {
+      ...(includeJson ? { 'Content-Type': 'application/json' } : {}),
+      Authorization: `Bearer ${token}`
+    };
+  };
 
   const loadAssignments = async () => {
     if (!currentUser.uid) return;
@@ -110,16 +125,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
       const nextNames: Record<string, string> = {};
       const nextRoles: Record<string, 'employee' | 'admin'> = {};
       const nextPictures: Record<string, string> = {};
+      const nextShowcases: Record<string, EmployeeShowcaseDraft> = {};
       for (const row of rows) {
         nextBoards[row.id] = row.assigned_boards || [];
         nextNames[row.id] = row.name || '';
         nextRoles[row.id] = row.role === 'admin' ? 'admin' : 'employee';
         nextPictures[row.id] = row.picture_url || '';
+        nextShowcases[row.id] = extractEmployeeShowcaseDraft(row.landing_html || '');
       }
       setBoardDrafts(nextBoards);
       setNameDrafts(nextNames);
       setRoleDrafts(nextRoles);
       setPictureDrafts(nextPictures);
+      setShowcaseDrafts(nextShowcases);
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || 'Failed to load assigned users.' });
     } finally {
@@ -167,6 +185,50 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
       return;
     }
     setPictureDrafts((prev) => ({ ...prev, [target]: '' }));
+  };
+
+  const updateShowcaseDraft = (assignmentId: string, updates: Partial<EmployeeShowcaseDraft>) => {
+    setShowcaseDrafts((prev) => ({
+      ...prev,
+      [assignmentId]: {
+        ...(prev[assignmentId] || { ...EMPTY_EMPLOYEE_SHOWCASE }),
+        ...updates
+      }
+    }));
+  };
+
+  const uploadShowcaseMedia = async (assignmentId: string, file?: File | null) => {
+    if (!file) return;
+    const assignment = assignments.find((row) => row.id === assignmentId);
+    if (!assignment?.claimed_user_id) {
+      setMessage({ type: 'warning', text: 'The employee must join once before spotlight media can be saved.' });
+      return;
+    }
+
+    setShowcaseUploadTarget(assignmentId);
+    setMessage(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch(apiUrl('/api/admin/landing-media'), {
+        method: 'POST',
+        headers: await getAuthHeaders(),
+        body: formData
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+
+      updateShowcaseDraft(assignmentId, {
+        mediaUrl: String(data?.url || ''),
+        mediaType: data?.mediaType === 'video' ? 'video' : 'image'
+      });
+      setMessage({ type: 'success', text: `${file.name} uploaded for the employee spotlight.` });
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Failed to upload spotlight media.' });
+    } finally {
+      setShowcaseUploadTarget(null);
+    }
   };
 
   const handleAssignUser = async (e: React.FormEvent) => {
@@ -228,19 +290,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
       const endpoint = apiUrl(`/api/admin/assignments/${assignmentId}`);
       const res = await fetch(endpoint, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await getAuthHeaders(true),
         body: JSON.stringify({
           admin_id: currentUser.uid,
           name: nameDrafts[assignmentId] || '',
           role: nextRole,
           assigned_boards: nextBoards,
           assigned_companies: [],
-          picture: pictureDrafts[assignmentId] ?? ''
+          picture: pictureDrafts[assignmentId] ?? '',
+          landing_html: buildEmployeeShowcaseHtml(showcaseDrafts[assignmentId])
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
-      setMessage({ type: 'success', text: 'Access updated successfully.' });
+      setMessage({ type: 'success', text: 'Access and employee spotlight updated successfully.' });
       await loadAssignments();
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || 'Failed to update access.' });
@@ -537,6 +600,91 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser }) => {
                     {assignment.status === 'active'
                       ? `Joined${assignment.joined_at ? ` on ${new Date(assignment.joined_at).toLocaleString()}` : ''}.`
                       : `Waiting for first sign-in${assignment.invited_at ? ` since ${new Date(assignment.invited_at).toLocaleString()}` : ''}.`}
+                  </div>
+
+                  <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+                    <div className="mb-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Employee Spotlight</p>
+                      <p className="mt-1 text-xs text-slate-400">
+                        Add a badge, words from the admin, and a background image or video for this employee&apos;s dashboard.
+                      </p>
+                    </div>
+
+                    <div className="mb-3">
+                      <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">Badge</label>
+                      <input
+                        type="text"
+                        value={showcaseDrafts[assignment.id]?.badge || EMPTY_EMPLOYEE_SHOWCASE.badge}
+                        onChange={(e) => updateShowcaseDraft(assignment.id, { badge: e.target.value })}
+                        placeholder="Employee Spotlight"
+                        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+                        disabled={!assignment.claimed_user_id}
+                      />
+                    </div>
+
+                    <div className="mb-3">
+                      <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">Headline</label>
+                      <input
+                        type="text"
+                        value={showcaseDrafts[assignment.id]?.title || ''}
+                        onChange={(e) => updateShowcaseDraft(assignment.id, { title: e.target.value })}
+                        placeholder="Best Employee of the Month"
+                        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+                        disabled={!assignment.claimed_user_id}
+                      />
+                    </div>
+
+                    <div className="mb-3">
+                      <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">Admin Message</label>
+                      <textarea
+                        value={showcaseDrafts[assignment.id]?.message || ''}
+                        onChange={(e) => updateShowcaseDraft(assignment.id, { message: e.target.value })}
+                        placeholder="Michael kept Board B clean all month. Great speed, great follow-through, great consistency."
+                        rows={4}
+                        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+                        disabled={!assignment.claimed_user_id}
+                      />
+                    </div>
+
+                    <div className="mb-3">
+                      <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">Background Image or Video</label>
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp,image/gif,image/avif,video/mp4,video/webm,video/ogg,video/quicktime"
+                        onChange={(e) => {
+                          void uploadShowcaseMedia(assignment.id, e.target.files?.[0]);
+                          e.currentTarget.value = '';
+                        }}
+                        className="mt-1 block w-full text-sm text-slate-600 file:mr-4 file:rounded-lg file:border-0 file:bg-indigo-600 file:px-4 file:py-2 file:font-bold file:text-white hover:file:bg-indigo-700 dark:text-slate-300"
+                        disabled={!assignment.claimed_user_id || showcaseUploadTarget === assignment.id}
+                      />
+                      <div className="mt-2 flex items-center justify-between gap-3">
+                        <p className="text-xs text-slate-400">
+                          Supported: JPG, PNG, WEBP, GIF, AVIF, MP4, WEBM, OGG, MOV.
+                        </p>
+                        {showcaseDrafts[assignment.id]?.mediaUrl && (
+                          <button
+                            type="button"
+                            onClick={() => updateShowcaseDraft(assignment.id, { mediaUrl: '', mediaType: '' })}
+                            className="text-xs font-bold text-rose-600 hover:text-rose-700 dark:text-rose-400"
+                          >
+                            Remove Media
+                          </button>
+                        )}
+                      </div>
+                      {showcaseUploadTarget === assignment.id && (
+                        <p className="mt-2 text-xs font-semibold text-indigo-600 dark:text-indigo-300">Uploading spotlight media...</p>
+                      )}
+                    </div>
+
+                    {buildEmployeeShowcaseHtml(showcaseDrafts[assignment.id]) && (
+                      <LandingContent
+                        html={buildEmployeeShowcaseHtml(showcaseDrafts[assignment.id])}
+                        title="Dashboard Preview"
+                        subtitle="This will appear on the employee dashboard after you save."
+                        compact
+                      />
+                    )}
                   </div>
 
                   <button

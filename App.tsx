@@ -1,12 +1,13 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Driver, DutyStatus, ELDStatus, FollowUpStatus, EmailLogEntry, GoogleUser, AuthUser, DriverReply, EmailTemplateMap, Company, RealtimeChannelHealth } from './types';
+import { Driver, DutyStatus, ELDStatus, FollowUpStatus, EmailLogEntry, GoogleUser, AuthUser, DriverReply, EmailTemplateMap, Company, RealtimeChannelHealth, TeamMessage } from './types';
 import { INITIAL_DRIVERS } from './constants';
 import { DriverTable } from './components/DriverTable';
 import { StatsCard } from './components/StatsCard';
 import { Login } from './components/Login';
 import { DriverReplies } from './components/DriverReplies';
 import { AIAssistant } from './components/AIAssistant';
+import { TeamChat } from './components/TeamChat';
 import { ProfileForm } from './components/ProfileForm';
 import { Dashboard } from './components/Dashboard';
 import { CustomEmail } from './components/CustomEmail';
@@ -24,7 +25,9 @@ import {
   subscribeToCompanies,
   subscribeToEmailLogs,
   subscribeToDriverReplies,
-  addEmailLog
+  addEmailLog,
+  addTeamMessage,
+  subscribeToTeamMessages
 } from './services/supabaseService';
 import { sendGmailMessage, fetchGmailReplies } from './services/gmailService';
 import { Sidebar } from './components/Sidebar';
@@ -43,7 +46,8 @@ const createInitialRealtimeHealth = (): Record<string, RealtimeChannelHealth> =>
   companies: { status: 'IDLE' },
   emailLogs: { status: 'IDLE' },
   driverReplies: { status: 'IDLE' },
-  profile: { status: 'IDLE' }
+  profile: { status: 'IDLE' },
+  teamMessages: { status: 'IDLE' }
 });
 
 const readJsonStorage = <T,>(key: string, fallback: T): T => {
@@ -311,6 +315,7 @@ const App: React.FC = () => {
   const [drivers, setDrivers] = useState<Driver[]>(() => readJsonStorage(STORAGE_KEYS.drivers, INITIAL_DRIVERS));
   const [emailLogs, setEmailLogs] = useState<EmailLogEntry[]>(() => readJsonStorage(STORAGE_KEYS.emailLogs, []));
   const [driverReplies, setDriverReplies] = useState<DriverReply[]>(() => readJsonStorage(STORAGE_KEYS.driverReplies, []));
+  const [teamMessages, setTeamMessages] = useState<TeamMessage[]>([]);
   const [activeTab, setActiveTab] = useState('Dashboard');
   const [isResetting, setIsResetting] = useState(false);
   const [expandedLogs, setExpandedLogs] = useState<Set<string>>(new Set());
@@ -364,6 +369,7 @@ const App: React.FC = () => {
     ? authUser.adminId
     : activeUserId;
   const driverScopeId = driverOwnerUserId || activeUserId;
+  const teamChatScopeId = driverScopeId;
   const allowedBoards = normalizeBoardList(authUser?.assignedBoards || (authUser?.assignedBoard ? [authUser.assignedBoard] : []));
   const fixedEmployeeBoard = !isAdminUser && allowedBoards.length === 1 ? allowedBoards[0] : undefined;
   const rawApiBaseUrl = ((import.meta as any).env.VITE_API_URL || '').trim();
@@ -530,6 +536,17 @@ const App: React.FC = () => {
     if (!res.ok) throw new Error(data?.error || `Backend email send failed (${res.status}).`);
     return { sentVia: 'SMTP' };
   }, [apiUrl, user]);
+
+  const handleSendTeamMessage = useCallback(async (body: string) => {
+    if (!teamChatScopeId || !activeUserId) return;
+    await addTeamMessage(
+      teamChatScopeId,
+      activeUserId,
+      senderDisplayName,
+      authUser?.role || 'user',
+      body
+    );
+  }, [teamChatScopeId, activeUserId, senderDisplayName, authUser?.role]);
 
   // Persist theme
   useEffect(() => {
@@ -752,6 +769,7 @@ const App: React.FC = () => {
     updateRealtimeChannelStatus('companies', 'JOINING');
     updateRealtimeChannelStatus('emailLogs', 'JOINING');
     updateRealtimeChannelStatus('driverReplies', 'JOINING');
+    updateRealtimeChannelStatus('teamMessages', 'JOINING');
 
     const unsubDrivers = subscribeToDrivers(
       driverScopeId,
@@ -805,6 +823,11 @@ const App: React.FC = () => {
       setDriverReplies(driverReplySnapshot);
     }, (status) => updateRealtimeChannelStatus('driverReplies', status));
 
+    const unsubTeamMessages = subscribeToTeamMessages(teamChatScopeId, (teamMessageSnapshot) => {
+      markRealtimeChannelEvent('teamMessages');
+      setTeamMessages(teamMessageSnapshot);
+    }, (status) => updateRealtimeChannelStatus('teamMessages', status));
+
     const refreshOnVisibility = () => {
       if (document.visibilityState === 'visible') {
         reconcileDrivers().catch(() => undefined);
@@ -832,11 +855,12 @@ const App: React.FC = () => {
       unsubCompanies();
       unsubLogs();
       unsubReplies();
+      unsubTeamMessages();
       window.clearInterval(refreshInterval);
       window.removeEventListener('focus', refreshOnFocus);
       document.removeEventListener('visibilitychange', refreshOnVisibility);
     };
-  }, [activeUserId, driverScopeId, authUser?.email, authUser?.name, allowedBoards.join('|'), isAdminUser, syncAuthMetadataFromCurrentUser, user?.accessToken, user?.email, user?.name, applyDriverSnapshot, updateRealtimeChannelStatus, markRealtimeChannelEvent]);
+  }, [activeUserId, driverScopeId, teamChatScopeId, authUser?.email, authUser?.name, allowedBoards.join('|'), isAdminUser, syncAuthMetadataFromCurrentUser, user?.accessToken, user?.email, user?.name, applyDriverSnapshot, updateRealtimeChannelStatus, markRealtimeChannelEvent]);
 
   useEffect(() => {
     if (!activeUserId) return;
@@ -1579,6 +1603,13 @@ const App: React.FC = () => {
 
         {activeTab === 'Profile Form' && <ProfileForm drivers={accessibleDrivers} emailLogs={emailLogs} onSendReminder={handleProfileFormReminder} onUpdatePFDate={handleUpdatePFDate} />}
         {activeTab === 'AI Assistant' && <AIAssistant userId={authUser?.uid} />}
+        {activeTab === 'Team Chat' && (
+          <TeamChat
+            currentUser={authUser}
+            messages={teamMessages}
+            onSend={handleSendTeamMessage}
+          />
+        )}
         {activeTab === 'Broadcast' && <EmailBroadcast drivers={accessibleDrivers} assignedBoard={fixedEmployeeBoard} userId={activeUserId} userAccessToken={user?.accessToken} />}
         {activeTab === 'History' && (
           <div className="space-y-4">

@@ -39,6 +39,16 @@ export interface DriverReply {
   sentiment?: 'frustrated' | 'cooperative' | 'urgent';
 }
 
+export interface TeamMessage {
+  id: string;
+  adminScopeId: string;
+  senderUserId: string;
+  senderName: string;
+  senderRole?: 'admin' | 'employee' | 'user';
+  body: string;
+  createdAt: string;
+}
+
 export interface Driver {
   id: string;
   name: string;

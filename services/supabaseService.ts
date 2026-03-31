@@ -1,5 +1,5 @@
 import { supabase } from '../supabase';
-import { Company, Driver, EmailLogEntry, DriverReply } from '../types';
+import { Company, Driver, EmailLogEntry, DriverReply, TeamMessage } from '../types';
 
 export interface UserProfile {
     id: string;
@@ -470,6 +470,49 @@ export const addDriverReply = async (userId: string, reply: DriverReply) => {
     throwIfSupabaseError('addDriverReply', error);
 };
 
+const mapDbToTeamMessage = (row: any): TeamMessage => ({
+    id: row.id,
+    adminScopeId: row.user_id,
+    senderUserId: row.sender_user_id,
+    senderName: row.sender_name,
+    senderRole: row.sender_role,
+    body: row.body,
+    createdAt: row.created_at
+});
+
+export const fetchTeamMessages = async (adminScopeId: string): Promise<TeamMessage[]> => {
+    const { data, error } = await supabase
+        .from('team_messages')
+        .select('*')
+        .eq('user_id', adminScopeId)
+        .order('created_at', { ascending: true });
+    throwIfSupabaseError('fetchTeamMessages', error);
+    return (data || []).map(mapDbToTeamMessage);
+};
+
+export const addTeamMessage = async (
+    adminScopeId: string,
+    senderUserId: string,
+    senderName: string,
+    senderRole: TeamMessage['senderRole'],
+    body: string
+): Promise<TeamMessage> => {
+    const payload = {
+        user_id: adminScopeId,
+        sender_user_id: senderUserId,
+        sender_name: senderName,
+        sender_role: senderRole || 'user',
+        body: body.trim()
+    };
+    const { data, error } = await supabase
+        .from('team_messages')
+        .insert(payload)
+        .select('*')
+        .single();
+    throwIfSupabaseError('addTeamMessage', error);
+    return mapDbToTeamMessage(data);
+};
+
 export const subscribeToDrivers = (
     ownerId: string,
     callback: (drivers: Driver[]) => void,
@@ -547,5 +590,19 @@ export const subscribeToDriverReplies = (
             callback(await fetchDriverReplies(userId));
         })
         .subscribe((status) => emitRealtimeStatus(`driver_replies:${userId}`, status, onStatusChange));
+    return () => supabase.removeChannel(channel);
+};
+
+export const subscribeToTeamMessages = (
+    adminScopeId: string,
+    callback: (messages: TeamMessage[]) => void,
+    onStatusChange?: RealtimeStatusCallback
+) => {
+    fetchTeamMessages(adminScopeId).then(callback);
+    const channel = supabase.channel(`public:team_messages:user_id=eq.${adminScopeId}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'team_messages', filter: `user_id=eq.${adminScopeId}` }, async () => {
+            callback(await fetchTeamMessages(adminScopeId));
+        })
+        .subscribe((status) => emitRealtimeStatus(`team_messages:${adminScopeId}`, status, onStatusChange));
     return () => supabase.removeChannel(channel);
 };

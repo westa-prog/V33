@@ -13,6 +13,8 @@ import {
   ChevronRight,
   User,
   PlugZap
+  ,
+  MessageSquare
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { DatabaseSyncControl } from './DatabaseSyncControl';
@@ -23,6 +25,7 @@ export const menuItems = [
   { icon: Wifi, label: "Connection", id: 'Connection', color: "text-green-500" },
   { icon: FileText, label: "Profile Form", id: 'Profile Form', color: "text-orange-500" },
   { icon: Sparkles, label: "AI Assistant", id: 'AI Assistant', color: "text-purple-500" },
+  { icon: MessageSquare, label: "Team Chat", id: 'Team Chat', color: "text-cyan-500" },
   { icon: TrendingUp, label: "History & Activity", id: 'History', color: "text-emerald-500" },
   { icon: Mail, label: "Broadcast", id: 'Broadcast', color: "text-rose-500" },
   { icon: Settings, label: "Settings", id: 'Settings', color: "text-slate-500" },
