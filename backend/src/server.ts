@@ -721,6 +721,75 @@ app.post('/api/email/test-send', requireAdminAuth, async (req, res) => {
     }
 });
 
+app.post('/api/auth/access-status', async (req, res) => {
+    try {
+        const normalizedEmail = normalizeEmail(req.body?.email);
+        if (!isValidEmail(normalizedEmail)) {
+            res.status(400).json({ error: 'A valid email is required.' });
+            return;
+        }
+
+        const isAdminEmail = normalizedEmail === ADMIN_EMAIL;
+        const supabase = getDb();
+        let assignment: any = null;
+
+        if (!isAdminEmail) {
+            const { data: assignmentData, error: assignmentError } = await supabase
+                .from('employee_assignments')
+                .select('id,email,name,status,claimed_user_id')
+                .eq('email', normalizedEmail)
+                .maybeSingle();
+
+            if (assignmentError && !isMissingEmployeeAssignmentsTable(String(assignmentError.message || ''))) {
+                res.status(500).json({ error: assignmentError.message });
+                return;
+            }
+
+            assignment = assignmentData || null;
+        }
+
+        if (!isAdminEmail && !assignment) {
+            res.json({
+                success: true,
+                email: normalizedEmail,
+                assigned: false,
+                isAdminEmail: false,
+                hasAuthUser: false,
+                hasSignedIn: false,
+                needsPasswordSetup: false,
+                recommendedAction: 'sign_in'
+            });
+            return;
+        }
+
+        const authUser = await findAuthUserByEmail(supabase, normalizedEmail);
+        const hasAuthUser = Boolean(authUser);
+        const hasSignedIn = Boolean(authUser?.last_sign_in_at);
+        const needsPasswordSetup = hasAuthUser && !hasSignedIn;
+        const recommendedAction = hasSignedIn ? 'sign_in' : (hasAuthUser ? 'set_password' : 'sign_up');
+
+        res.json({
+            success: true,
+            email: normalizedEmail,
+            assigned: Boolean(assignment) || isAdminEmail,
+            isAdminEmail,
+            assignmentStatus: assignment?.status || null,
+            hasAuthUser,
+            hasSignedIn,
+            needsPasswordSetup,
+            recommendedAction,
+            fullName: String(assignment?.name || authUser?.user_metadata?.full_name || normalizedEmail.split('@')[0] || 'User')
+        });
+    } catch (e: any) {
+        console.error('[API] Auth access-status failed:', e);
+        if (isMissingEmployeeAssignmentsTable(String(e?.message || ''))) {
+            res.status(500).json({ error: 'Missing Supabase migration: run supabase/migrations/0007_employee_assignments.sql and redeploy Render.' });
+            return;
+        }
+        res.status(500).json({ error: e.message || 'Failed to resolve access status.' });
+    }
+});
+
 app.post('/api/admin/landing-media', requireAdminAuth, upload.single('file'), async (req, res) => {
     const file = req.file;
 

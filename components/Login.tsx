@@ -21,7 +21,21 @@ interface LoginProps {
   onLogin: (user: AuthUser) => void;
 }
 
+type AccessStatus = {
+  assigned: boolean;
+  isAdminEmail?: boolean;
+  assignmentStatus?: string | null;
+  hasAuthUser: boolean;
+  hasSignedIn: boolean;
+  needsPasswordSetup: boolean;
+  recommendedAction: 'sign_in' | 'sign_up' | 'set_password';
+  fullName?: string;
+};
+
 export const Login: React.FC<LoginProps> = ({ onLogin }) => {
+  const rawApiBaseUrl = ((import.meta as any).env.VITE_API_URL || '').trim();
+  const apiBaseUrl = rawApiBaseUrl.replace(/\/+$/, '');
+  const apiUrl = (path: string) => apiBaseUrl ? `${apiBaseUrl}${path}` : path;
   const [view, setView] = useState<'landing' | 'auth'>('landing');
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
   const [fullName, setFullName] = useState('');
@@ -63,6 +77,61 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
     setView('auth');
   };
 
+  const lookupAccessStatus = async (normalizedEmail: string): Promise<AccessStatus | null> => {
+    try {
+      const res = await fetch(apiUrl('/api/auth/access-status'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: normalizedEmail })
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data) return null;
+      return {
+        assigned: Boolean(data.assigned),
+        isAdminEmail: Boolean(data.isAdminEmail),
+        assignmentStatus: typeof data.assignmentStatus === 'string' ? data.assignmentStatus : null,
+        hasAuthUser: Boolean(data.hasAuthUser),
+        hasSignedIn: Boolean(data.hasSignedIn),
+        needsPasswordSetup: Boolean(data.needsPasswordSetup),
+        recommendedAction: data.recommendedAction === 'sign_up' || data.recommendedAction === 'set_password' ? data.recommendedAction : 'sign_in',
+        fullName: typeof data.fullName === 'string' ? data.fullName : undefined
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const sendPasswordSetupLink = async (normalizedEmail: string, redirectTo?: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, { redirectTo });
+    if (error) throw error;
+    setPassword('');
+    setMode('signin');
+    setMessage(`We sent a password setup link to ${normalizedEmail}. Open that email, create your password, then sign in.`);
+  };
+
+  const createAssignedAccount = async (normalizedEmail: string, redirectTo?: string, displayName?: string) => {
+    const signUpResult = await supabase.auth.signUp({
+      email: normalizedEmail,
+      password,
+      options: {
+        emailRedirectTo: redirectTo,
+        data: {
+          full_name: (displayName || fullName).trim() || normalizedEmail.split('@')[0]
+        }
+      }
+    });
+    if (signUpResult.error) throw signUpResult.error;
+
+    if (signUpResult.data.session?.user) {
+      onLogin(buildAuthUser(signUpResult.data.session.user));
+      return;
+    }
+
+    setPassword('');
+    setMode('signin');
+    setMessage(`Account created for ${normalizedEmail}. Check your email and click the confirmation link to return to the app and finish setup.`);
+  };
+
   const handleGoogleAppLogin = async () => {
     try {
       setIsSubmitting(true);
@@ -89,26 +158,23 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
       const redirectTo = getAuthRedirectTo();
 
       if (mode === 'signup') {
-        const signUpResult = await supabase.auth.signUp({
-          email: normalizedEmail,
-          password,
-          options: {
-            emailRedirectTo: redirectTo,
-            data: {
-              full_name: fullName.trim() || normalizedEmail.split('@')[0]
+        try {
+          await createAssignedAccount(normalizedEmail, redirectTo);
+        } catch (signupError) {
+          const authMessage = String(signupError instanceof Error ? signupError.message : signupError || '').toLowerCase();
+          if (authMessage.includes('already registered') || authMessage.includes('already been registered') || authMessage.includes('user already exists')) {
+            const accessStatus = await lookupAccessStatus(normalizedEmail);
+            if (accessStatus?.needsPasswordSetup) {
+              await sendPasswordSetupLink(normalizedEmail, redirectTo);
+              return;
             }
+            setPassword('');
+            setMode('signin');
+            setMessage(`An account already exists for ${normalizedEmail}. Sign in with your password to continue.`);
+            return;
           }
-        });
-        if (signUpResult.error) throw signUpResult.error;
-
-        if (signUpResult.data.session?.user) {
-          onLogin(buildAuthUser(signUpResult.data.session.user));
-          return;
+          throw signupError;
         }
-
-        setPassword('');
-        setMessage(`Account created for ${normalizedEmail}. Check your email and click the confirmation link to return to the app and finish setup.`);
-        setMode('signin');
         return;
       }
 
@@ -118,6 +184,20 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
         if (authMessage.includes('email not confirmed')) {
           setPassword('');
           setMessage(`Confirm ${normalizedEmail} from the email link first, then sign in again.`);
+          return;
+        }
+        if (authMessage.includes('invalid login credentials')) {
+          const accessStatus = await lookupAccessStatus(normalizedEmail);
+          if (accessStatus?.recommendedAction === 'sign_up') {
+            await createAssignedAccount(normalizedEmail, redirectTo, accessStatus.fullName);
+            return;
+          }
+          if (accessStatus?.recommendedAction === 'set_password') {
+            await sendPasswordSetupLink(normalizedEmail, redirectTo);
+            return;
+          }
+          setPassword('');
+          setMessage(`No password matched ${normalizedEmail}. If this is your first time, use Sign Up with your assigned email.`);
           return;
         }
         throw signInResult.error;
@@ -155,7 +235,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 </div>
                 <h2 className="text-2xl font-black tracking-tight text-white md:text-3xl">One link. One login. Full board access.</h2>
                 <p className="mt-3 text-sm leading-6 text-neutral-400 md:text-base">
-                  Start from the landing page, then continue to the secure login screen. After sign-in, assigned users automatically receive their boards and role access.
+                  Start from the landing page, then continue to the secure login screen. First-time employees can create access with their assigned email, and returning users can sign in with the same email.
                 </p>
                 <div className="mt-6 grid gap-3 sm:grid-cols-3">
                   <div className="rounded-2xl border border-white/10 bg-white/[0.05] p-4">
@@ -168,7 +248,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-white/[0.05] p-4">
                     <p className="text-[11px] font-black uppercase tracking-[0.2em] text-neutral-500">Step 3</p>
-                    <p className="mt-2 text-sm font-semibold text-white">Sign in with your assigned email</p>
+                    <p className="mt-2 text-sm font-semibold text-white">First time: Sign Up. Returning: Sign In.</p>
                   </div>
                 </div>
               </div>
@@ -195,7 +275,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 </div>
                 <h1 className="text-4xl font-black tracking-[-0.05em] text-white md:text-6xl">Login to continue</h1>
                 <p className="mt-4 max-w-xl text-base leading-7 text-neutral-400 md:text-lg">
-                  Use the email your admin assigned to you. After the first successful sign-in, your role and board access will be applied automatically.
+                  Use the email your admin assigned to you. First-time employees can create access here, and returning employees can sign in with the same email.
                 </p>
               </div>
 
@@ -213,7 +293,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                       <h2 className="text-2xl font-black tracking-tight text-white">{mode === 'signin' ? 'Secure Sign In' : 'Create Your Access'}</h2>
                       <p className="mt-2 text-sm text-neutral-400">
                         {mode === 'signin'
-                          ? 'Use the email assigned by your admin or continue with Google.'
+                          ? 'Use the email assigned by your admin. If this is your first time, the form will help you finish setup.'
                           : 'Create your account with the assigned email so your board access can be claimed automatically.'}
                       </p>
                     </div>
